@@ -1,0 +1,9 @@
+{
+  "name": "Vault",
+  "short_name": "Vault",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B0B0D",
+  "theme_color": "#0B0B0D",
+  "orientation": "portrait"
+}
