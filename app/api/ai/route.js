@@ -12,6 +12,17 @@ export async function POST(req) {
     );
   }
 
+  const wanted = process.env.VAULT_PASSPHRASE;
+  if (wanted) {
+    const given = req.headers.get("x-vault-pass") || "";
+    if (given !== wanted) {
+      return Response.json(
+        { error: { type: "authentication_error", message: "PASSPHRASE: wrong or missing app passphrase." } },
+        { status: 401 }
+      );
+    }
+  }
+
   let body;
   try { body = await req.json(); }
   catch { return Response.json({ error: { type: "bad_request", message: "Malformed request." } }, { status: 400 }); }
