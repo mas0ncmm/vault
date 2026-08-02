@@ -36,7 +36,7 @@ export async function POST(req) {
 
   const payload = {
     model: body.model,
-    max_tokens: Math.min(Number(body.max_tokens) || 1000, 2000),
+    max_tokens: Math.min(Number(body.max_tokens) || 1000, 4000),
     messages: body.messages,
   };
   if (Array.isArray(body.tools) && body.tools.length) payload.tools = body.tools;
