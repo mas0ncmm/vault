@@ -17,7 +17,7 @@ import {
    ============================================================ */
 
 /* ---------- design tokens ---------- */
-const APP_VERSION = "web v1.2";
+const APP_VERSION = "web v1.3";
 const T = {
   bg: "#0B0B0D",
   surface: "#151518",
@@ -110,7 +110,7 @@ async function getPass() {
 async function setPass(v) { passCache = v || ""; await sSet(K_PASS, passCache); }
 
 async function aiCallOnce(model, content, useSearch) {
-  const bodyObj = { model, max_tokens: 1000, messages: [{ role: "user", content }] };
+  const bodyObj = { model, max_tokens: 3000, messages: [{ role: "user", content }] };
   if (useSearch) bodyObj.tools = [{ type: "web_search_20250305", name: "web_search" }];
   const res = await fetch("/api/ai", {
     method: "POST",
