@@ -9,6 +9,10 @@ import {
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
+import {
+  T, display, body, globalCss,
+  STATUSES, UNSOLD, OWNED, STATUS_COLOR, CONDITIONS, PLATFORMS, RATINGS, RATING_COLOR,
+} from "./theme";
 
 /* ============================================================
    VAULT — personal Vinted reselling app (full build)
@@ -16,49 +20,10 @@ import {
    AI opportunity checker · Analytics · Backup & CSV
    ============================================================ */
 
-/* ---------- design tokens ---------- */
-const APP_VERSION = "web v1.3";
-const T = {
-  bg: "#0B0B0D",
-  surface: "#151518",
-  raised: "#1C1C21",
-  border: "#26262C",
-  text: "#F5F5F3",
-  sec: "#8E8E97",
-  accent: "#E4B54A",
-  accentSoft: "rgba(228,181,74,0.12)",
-  pos: "#4CC38A",
-  posSoft: "rgba(76,195,138,0.12)",
-  neg: "#E5534B",
-  negSoft: "rgba(229,83,75,0.12)",
-  blue: "#5B9BD5",
-};
-const display = { fontFamily: "'Archivo', system-ui, sans-serif" };
-const body = { fontFamily: "'Instrument Sans', system-ui, sans-serif" };
+const APP_VERSION = "v2.0 aurora";
 
-const globalCss = `
-  @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap');
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin: 0; }
-  .vscroll::-webkit-scrollbar { display: none; }
-  .vscroll { scrollbar-width: none; }
-  input, select, textarea, button { font-family: 'Instrument Sans', system-ui, sans-serif; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid rgba(228,181,74,0.5); outline-offset: 0; }
-  @media (prefers-reduced-motion: reduce) { .vanim { transition: none !important; } }
-`;
-
-/* ---------- constants ---------- */
-const STATUSES = ["Considering","Purchased","Draft","Ready to List","Listed","Reserved","Sold","Returned","Rejected","Archived"];
-const UNSOLD = ["Purchased","Draft","Ready to List","Listed","Reserved"];
-const OWNED = ["Purchased","Draft","Ready to List","Listed","Reserved","Sold","Returned"];
-const STATUS_COLOR = {
-  Considering: T.blue, Purchased: T.accent, Draft: T.sec, "Ready to List": T.accent,
-  Listed: T.blue, Reserved: "#B58BD8", Sold: T.pos, Returned: T.neg, Rejected: T.neg, Archived: T.sec,
-};
-const CONDITIONS = ["New with tags","New without tags","Very good","Good","Satisfactory"];
-const PLATFORMS = ["Vinted","eBay","Depop","Facebook Marketplace","Other"];
-const RATINGS = ["Really Bad","Bad","Average","Good","Really Good"];
-const RATING_COLOR = { "Really Bad": T.neg, Bad: "#E08B4C", Average: T.sec, Good: T.pos, "Really Good": T.pos };
+/* Unsold items idle past this many days render as "Quiet" instead of their status. */
+const STALE_DAYS = 60;
 
 /* ---------- helpers ---------- */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -315,11 +280,12 @@ function Chip({ label, color, active, onClick, small }) {
     }}>{label}</button>
   );
 }
-function StatusPill({ status }) {
-  const c = STATUS_COLOR[status] || T.sec;
+function StatusPill({ status, age }) {
+  const stale = age != null && age > STALE_DAYS;
+  const c = stale ? T.a5 : (STATUS_COLOR[status] || T.sec);
   return (
     <span style={{ background: `${c}1F`, color: c, borderRadius: 999, padding: "3px 9px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-      {status}
+      {stale ? `Quiet · ${age}d` : status}
     </span>
   );
 }
@@ -412,7 +378,7 @@ function Spinner({ label }) {
 }
 function ScreenHeader({ title, onBack, right }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "calc(14px + env(safe-area-inset-top, 0px)) 18px 12px", position: "sticky", top: 0, background: "rgba(11,11,13,0.92)", backdropFilter: "blur(12px)", zIndex: 10, borderBottom: `1px solid ${T.border}` }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "calc(14px + env(safe-area-inset-top, 0px)) 18px 12px", position: "sticky", top: 0, background: "rgba(1,2,7,0.92)", backdropFilter: "blur(12px)", zIndex: 10, borderBottom: `1px solid ${T.border}` }}>
       {onBack && (
         <button onClick={onBack} aria-label="Back" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", color: T.text, cursor: "pointer", flexShrink: 0 }}>
           <ChevronLeft size={18} />
@@ -631,9 +597,9 @@ function StockScreen({ items, go }) {
                       {[it.brand, it.size, it.category].filter(Boolean).join(" · ") || "No details"}
                     </div>
                     <div style={{ marginTop: 5, display: "flex", gap: 6, alignItems: "center" }}>
-                      <StatusPill status={it.status} />
-                      {c.age != null && c.age > 30 && (
-                        <span style={{ ...body, fontSize: 10.5, color: c.age > 60 ? T.neg : T.sec }}>{c.age}d in stock</span>
+                      <StatusPill status={it.status} age={c.age} />
+                      {c.age != null && c.age > 30 && c.age <= STALE_DAYS && (
+                        <span style={{ ...body, fontSize: 10.5, color: T.sec }}>{c.age}d in stock</span>
                       )}
                     </div>
                   </div>
@@ -713,7 +679,7 @@ function DetailInner({ it, go, updateItem, deleteItem, duplicateItem, toast }) {
         )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          <StatusPill status={it.status} />
+          <StatusPill status={it.status} age={c.age} />
           <select value={it.status} onChange={(e) => { updateItem({ ...it, status: e.target.value, updatedAt: Date.now() }); toast("Status updated"); }}
             style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, fontSize: 12.5, padding: "7px 9px" }}>
             {STATUSES.map((s) => <option key={s}>{s}</option>)}
@@ -756,8 +722,8 @@ function DetailInner({ it, go, updateItem, deleteItem, duplicateItem, toast }) {
             </div>
           )}
           {!c.sold && c.age != null && (
-            <div style={{ ...body, fontSize: 12, color: c.age > 60 ? T.neg : T.sec, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
-              In stock for {c.age} days{c.age > 60 ? " — consider a price reduction or relist" : ""}
+            <div style={{ ...body, fontSize: 12, color: c.age > STALE_DAYS ? T.neg : T.sec, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+              In stock for {c.age} days{c.age > STALE_DAYS ? " — consider a price reduction or relist" : ""}
             </div>
           )}
         </Card>
@@ -1826,7 +1792,7 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
             catch (e) { lines.push("✗ Text request — " + e.message); }
             try {
               const c = document.createElement("canvas"); c.width = 8; c.height = 8;
-              const ctx = c.getContext("2d"); ctx.fillStyle = "#E4B54A"; ctx.fillRect(0, 0, 8, 8);
+              const ctx = c.getContext("2d"); ctx.fillStyle = T.accent; ctx.fillRect(0, 0, 8, 8);
               await askClaude({ prompt: "Reply with exactly one word: OK", images: [c.toDataURL("image/jpeg", 0.7)] });
               imgOK = true; lines.push("✓ Image request — working");
             } catch (e) { lines.push("✗ Image request — " + e.message); }
@@ -1883,14 +1849,14 @@ function BottomNav({ screen, go }) {
     { id: "analytics", label: "Stats", icon: BarChart3 },
   ];
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around", borderTop: `1px solid ${T.border}`, background: "rgba(11,11,13,0.94)", backdropFilter: "blur(12px)", padding: "8px 6px calc(8px + env(safe-area-inset-bottom, 0px))", flexShrink: 0 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around", borderTop: `1px solid ${T.border}`, background: "rgba(1,2,7,0.94)", backdropFilter: "blur(12px)", padding: "8px 6px calc(8px + env(safe-area-inset-bottom, 0px))", flexShrink: 0 }}>
       {items.map((it) => {
         const Icon = it.icon;
         const activeN = screen === it.id || (it.id === "stock" && ["detail", "edit"].includes(screen));
         if (it.raised) {
           return (
             <button key={it.id} onClick={() => go({ name: "edit", id: null })} aria-label="Add item" className="vanim"
-              style={{ width: 48, height: 48, borderRadius: 16, background: T.accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: "0 6px 18px rgba(228,181,74,0.35)" }}>
+              style={{ width: 48, height: 48, borderRadius: 16, background: T.accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: "0 6px 18px rgba(74,200,255,0.35)" }}>
               <Icon size={24} color="#141210" strokeWidth={2.5} />
             </button>
           );
