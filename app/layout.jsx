@@ -1,8 +1,8 @@
 export const metadata = {
-  title: "Vault",
+  title: "Resell HQ",
   description: "Personal reselling app — stock, listings and profit tracking.",
   manifest: "/manifest.json",
-  appleWebApp: { capable: true, title: "Vault", statusBarStyle: "black-translucent" },
+  appleWebApp: { capable: true, title: "Resell HQ", statusBarStyle: "black-translucent" },
 };
 
 export const viewport = {
