@@ -2013,7 +2013,7 @@ export default function VaultApp() {
       paddingRight: "env(safe-area-inset-right, 0px)",
       boxSizing: "border-box",
     }}>
-      <style>{globalCss}</style>
+      <style dangerouslySetInnerHTML={{ __html: globalCss }} />
       <AppShell isDesktop={false} />
     </div>
   );
