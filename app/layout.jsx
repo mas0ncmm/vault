@@ -16,7 +16,7 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en-GB">
-      <body style={{ margin: 0, background: "#0B0B0D" }}>{children}</body>
+      <body style={{ margin: 0, background: "#010207" }}>{children}</body>
     </html>
   );
 }
