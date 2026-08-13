@@ -10,7 +10,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import {
-  T, display, body, globalCss,
+  T, display, body, mono, globalCss,
   STATUSES, UNSOLD, OWNED, STATUS_COLOR, CONDITIONS, PLATFORMS, RATINGS, RATING_COLOR,
 } from "./theme";
 
@@ -424,55 +424,249 @@ function PhotoGrid({ photos, onRemove, onAdd, max = 6 }) {
 }
 
 /* ============================================================
-   HOME
+   HOME — constellation
+   The four features are the navigation here: four glowing orbs
+   wired into a ring, with the all-time profit figure at the
+   centre of it. BottomNav is hidden on this screen only.
    ============================================================ */
+
+/* Index order matters — RING wires the orbs together by index. */
+/* Subtitles are kept short on purpose: Stock and Numbers sit at almost the
+   same height as the centre figure, so a wide label column would collide
+   with it on a phone. See ORB_COL. */
+const NODES = [
+  { id: "stock",     screen: "stock",     label: "Stock",   sub: "in · out · net", color: T.a1, left: 15, top: 46 },
+  { id: "generator", screen: "generator", label: "Listing", sub: "photo to copy",  color: T.a2, left: 40, top: 19 },
+  { id: "checker",   screen: "checker",   label: "Checker", sub: "buy or walk",    color: T.a4, left: 60, top: 80 },
+  { id: "analytics", screen: "analytics", label: "Numbers", sub: "what pays",      color: T.a5, left: 85, top: 44 },
+];
+const RING = [[0, 1], [1, 3], [3, 2], [2, 0]];
+const ORB = 68;
+/* Label column width. The outer orbs sit at 15%/85%, so this has to stay
+   narrow enough that their labels clear the centre figure's lane. */
+const ORB_COL = 88;
+/* Horizontal room left for the centre figure between the 15% and 85%
+   columns: (85% - 15%) of the width, minus one label column, minus a gutter. */
+const LANE = `calc(70% - ${ORB_COL + 8}px)`;
+const LANE_VW = `calc(70vw - ${ORB_COL + 8}px)`;
+const STAR_COUNT = 300;
+const EXIT_MS = 520;
+
+function useReducedMotion() {
+  const [reduce, setReduce] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReduce(!!mq.matches);
+    sync();
+    if (mq.addEventListener) { mq.addEventListener("change", sync); return () => mq.removeEventListener("change", sync); }
+    mq.addListener(sync);
+    return () => mq.removeListener(sync);
+  }, []);
+  return reduce;
+}
+
+/* Positions are random, so this must never render during SSR — the caller
+   gates it behind a mounted flag. useMemo keeps them stable across
+   re-renders once the client has picked them. */
+function Starfield({ reduce }) {
+  const stars = useMemo(() => Array.from({ length: STAR_COUNT }, (_, i) => ({
+    x: +(Math.random() * 100).toFixed(3),
+    y: +(Math.random() * 100).toFixed(3),
+    size: +(Math.random() * 1.7 + 0.6).toFixed(2),
+    op: +(Math.random() * 0.5 + 0.12).toFixed(2),
+    twinkle: i % 6 === 0,
+    dur: +(Math.random() * 2.8 + 2.4).toFixed(2),
+    delay: +(Math.random() * 6).toFixed(2),
+  })), []);
+  return (
+    <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+      {stars.map((s, i) => (
+        <span key={i} className={s.twinkle && !reduce ? "ctwinkle" : undefined}
+          style={{
+            position: "absolute", left: `${s.x}%`, top: `${s.y}%`,
+            width: s.size, height: s.size, borderRadius: "50%",
+            background: T.text, opacity: s.op,
+            "--tw-op": s.op, "--tw-dur": `${s.dur}s`,
+            animationDelay: `${s.delay}s`,
+          }} />
+      ))}
+    </div>
+  );
+}
+
 function HomeScreen({ go, items }) {
-  const soldProfit = items.filter((i) => i.status === "Sold").reduce((s, i) => s + (calc(i).profit || 0), 0);
+  const reduce = useReducedMotion();
+  const [mounted, setMounted] = useState(false);
+  const [geom, setGeom] = useState(null);
+  const [drawn, setDrawn] = useState(false);
+  const [exiting, setExiting] = useState(null);
+  const wrapRef = useRef(null);
+  const orbRefs = useRef([]);
+  const exitTimer = useRef(null);
+
+  useEffect(() => setMounted(true), []);
+  useEffect(() => () => clearTimeout(exitTimer.current), []);
+
+  /* Lines are drawn between the orbs' real on-screen centres rather than
+     recomputed from the percentages, so they stay true at any viewport. */
+  useEffect(() => {
+    const measure = () => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const wb = wrap.getBoundingClientRect();
+      if (!wb.width || !wb.height) return;
+      const pts = NODES.map((_, i) => {
+        const el = orbRefs.current[i];
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.left - wb.left + b.width / 2, y: b.top - wb.top + b.height / 2 };
+      });
+      if (pts.some((p) => !p)) return;
+      setGeom({ w: wb.width, h: wb.height, pts });
+    };
+    const raf = requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!geom || drawn) return;
+    if (reduce) { setDrawn(true); return; }
+    const raf = requestAnimationFrame(() => setDrawn(true));
+    return () => cancelAnimationFrame(raf);
+  }, [geom, drawn, reduce]);
+
+  const soldItems = items.filter((i) => i.status === "Sold");
+  const soldProfit = soldItems.reduce((s, i) => s + (calc(i).profit || 0), 0);
+  const profitText = gbp(soldProfit);
+  /* The spec size, but never wider than the lane between the outer orbs —
+     a long figure (or a narrow phone) would otherwise overrun their labels.
+     1.62 is the measured size-to-advance ratio for tabular digits here
+     (~0.59em per glyph, measured against the system fallback, which is
+     wider than Archivo — so this stays safe once the webfont loads). */
+  const figSize = `min(clamp(40px, 9vh, 58px), calc(${LANE_VW} / ${Math.max(5, profitText.length)} * 1.62))`;
   const unsold = items.filter((i) => UNSOLD.includes(i.status));
   const invested = unsold.reduce((s, i) => s + calc(i).tpc, 0);
-  const cards = [
-    { id: "stock", title: "Stock Tracker", desc: "Purchases, inventory, listings, sales and profit.", icon: Boxes },
-    { id: "generator", title: "Listing Generator", desc: "Turn product photos into honest, searchable Vinted listings.", icon: Sparkles },
-    { id: "checker", title: "Opportunity Checker", desc: "Analyse a listing before you buy it to resell.", icon: ScanSearch },
-    { id: "analytics", title: "Analytics", desc: "What makes money, what sells fast, where cash is tied up.", icon: BarChart3 },
-  ];
+
+  const lines = geom ? RING.map(([a, b], i) => {
+    const p = geom.pts[a], q = geom.pts[b];
+    return { i, a, b, p, q, len: Math.hypot(q.x - p.x, q.y - p.y) };
+  }) : [];
+
+  const tap = (n, i) => {
+    if (exiting) return;
+    if (reduce || !geom) { go({ name: n.screen }); return; }
+    setExiting({ i, color: n.color, screen: n.screen });
+    exitTimer.current = setTimeout(() => go({ name: n.screen }), EXIT_MS);
+  };
+
+  const stage = {
+    position: "absolute", inset: 0,
+    transform: exiting ? "scale(2.6)" : "scale(1)",
+    opacity: exiting ? 0 : 1,
+    transformOrigin: exiting && geom ? `${geom.pts[exiting.i].x}px ${geom.pts[exiting.i].y}px` : "50% 48%",
+    /* Accelerating, but not so back-loaded that the zoom lands after we
+       navigate — at ~85% of EXIT_MS this is already most of the way to 2.6. */
+    transition: reduce ? "none" : `transform ${EXIT_MS}ms cubic-bezier(.42,0,1,1), opacity ${EXIT_MS}ms cubic-bezier(.4,0,.7,1)`,
+  };
+
   return (
-    <div style={{ padding: "calc(22px + env(safe-area-inset-top, 0px)) 18px 18px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "100%" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "calc(22px + env(safe-area-inset-top, 0px)) 18px 0", flexShrink: 0 }}>
         <div>
-          <div style={{ ...display, fontWeight: 700, fontSize: 26, letterSpacing: "-0.02em", color: T.text }}>Vault</div>
-          <div style={{ ...body, fontSize: 13.5, color: T.sec, marginTop: 3 }}>Your reselling HQ · <b style={{ color: T.accent }}>{APP_VERSION}</b></div>
+          <div style={{ ...display, fontWeight: 700, fontSize: 26, letterSpacing: "-0.02em", color: T.text }}>Resell HQ</div>
+          <div style={{ ...body, fontSize: 13.5, color: T.sec, marginTop: 3 }}>Tap a light to begin · <b style={{ color: T.accent }}>{APP_VERSION}</b></div>
         </div>
-        <button onClick={() => go({ name: "settings" })} aria-label="Settings" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", color: T.sec, cursor: "pointer" }}>
+        <button onClick={() => go({ name: "settings" })} aria-label="Settings" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", color: T.sec, cursor: "pointer", flexShrink: 0 }}>
           <Settings size={18} />
         </button>
       </div>
 
-      {items.length > 0 && (
-        <div className="vscroll" style={{ display: "flex", gap: 10, overflowX: "auto", marginTop: 18, paddingBottom: 2 }}>
-          <StatCard label="Total profit" value={gbp(soldProfit)} color={soldProfit > 0 ? T.pos : soldProfit < 0 ? T.neg : T.text} />
-          <StatCard label="In stock" value={unsold.length} sub="unsold items" />
-          <StatCard label="Invested" value={gbp(invested)} sub="in unsold stock" />
-        </div>
-      )}
+      <div ref={wrapRef} style={{ position: "relative", flex: 1, minHeight: 430, overflow: "hidden", marginTop: 6 }}>
+        {mounted && <Starfield reduce={reduce} />}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 18 }}>
-        {cards.map((s) => {
-          const Icon = s.icon;
-          return (
-            <button key={s.id} onClick={() => go({ name: s.id })} className="vanim"
-              style={{ display: "flex", alignItems: "center", gap: 14, textAlign: "left", width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: "17px 16px", cursor: "pointer", color: T.text }}>
-              <div style={{ width: 46, height: 46, borderRadius: 14, background: T.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <Icon size={22} color={T.accent} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ ...display, fontWeight: 600, fontSize: 16, marginBottom: 3 }}>{s.title}</div>
-                <div style={{ ...body, fontSize: 13, color: T.sec, lineHeight: 1.45 }}>{s.desc}</div>
-              </div>
-              <ChevronRight size={18} color={T.sec} style={{ flexShrink: 0 }} />
+        <div style={stage}>
+          {geom && (
+            <svg width={geom.w} height={geom.h} viewBox={`0 0 ${geom.w} ${geom.h}`} aria-hidden="true"
+              style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
+              <defs>
+                {lines.map((l) => (
+                  <linearGradient key={l.i} id={`cline${l.i}`} gradientUnits="userSpaceOnUse" x1={l.p.x} y1={l.p.y} x2={l.q.x} y2={l.q.y}>
+                    <stop offset="0%" stopColor={NODES[l.a].color} stopOpacity="0.9" />
+                    <stop offset="50%" stopColor={T.a3} stopOpacity="0.5" />
+                    <stop offset="100%" stopColor={NODES[l.b].color} stopOpacity="0.9" />
+                  </linearGradient>
+                ))}
+              </defs>
+              {lines.map((l) => {
+                const animating = drawn && !reduce;
+                return (
+                  <line key={l.i} x1={l.p.x} y1={l.p.y} x2={l.q.x} y2={l.q.y}
+                    stroke={`url(#cline${l.i})`} strokeWidth={1} strokeLinecap="round"
+                    className={animating ? "cpulse" : undefined}
+                    style={{
+                      strokeDasharray: l.len,
+                      strokeDashoffset: drawn ? 0 : l.len,
+                      transition: reduce ? "none" : `stroke-dashoffset 1000ms ease ${180 + l.i * 160}ms`,
+                      animationDelay: `${1250 + l.i * 160}ms`,
+                      ...(animating ? null : { opacity: 0.42 }),
+                    }} />
+                );
+              })}
+            </svg>
+          )}
+
+          {/* Width is pinned to the clear lane between the 15% and 85% orb
+              columns so the figure never runs into their labels. */}
+          <div style={{ position: "absolute", left: "50%", top: "47%", transform: "translate(-50%, -50%)", textAlign: "center", pointerEvents: "none", width: `min(${LANE}, 300px)` }}>
+            <div style={{ ...body, fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase", color: T.dim, fontWeight: 500 }}>Profit · all time</div>
+            <div style={{ ...display, fontSize: figSize, fontWeight: 200, lineHeight: 1.04, margin: "8px 0 10px", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: soldProfit > 0 ? T.pos : soldProfit < 0 ? T.neg : T.text }}>
+              {profitText}
+            </div>
+            {/* No separator glyphs: the lane is narrow enough that this row
+                wraps, and standalone separators dangle at the line end. */}
+            <div style={{ ...mono, fontSize: 10.5, color: T.dim, display: "flex", justifyContent: "center", alignItems: "center", gap: "6px 14px", flexWrap: "wrap" }}>
+              <span style={{ whiteSpace: "nowrap" }}>Shelf {unsold.length}</span>
+              <span style={{ whiteSpace: "nowrap" }}>Tied up {gbp(invested)}</span>
+              <span style={{ whiteSpace: "nowrap" }}>Sold {soldItems.length}</span>
+            </div>
+          </div>
+
+          {NODES.map((n, i) => (
+            <button key={n.id} onClick={() => tap(n, i)} aria-label={`${n.label} — ${n.sub}`}
+              style={{
+                position: "absolute", left: `${n.left}%`, top: `${n.top}%`, transform: "translate(-50%, -50%)",
+                display: "flex", flexDirection: "column", alignItems: "center",
+                background: "none", border: "none", padding: 0, width: ORB_COL, color: T.text, cursor: "pointer", zIndex: 3,
+              }}>
+              <span ref={(el) => { orbRefs.current[i] = el; }} className={reduce ? undefined : "cbreathe"}
+                style={{
+                  display: "block", width: ORB, height: ORB, borderRadius: "50%", flexShrink: 0,
+                  background: `radial-gradient(circle at 50% 46%, #FFFFFF 0%, ${n.color}CC 22%, ${n.color} 62%, transparent 74%)`,
+                  filter: `drop-shadow(0 0 18px ${n.color}) drop-shadow(0 0 52px ${n.color})`,
+                  animationDelay: `${i * 0.7}s`,
+                }} />
+              <span style={{ ...display, fontSize: 14, fontWeight: 600, marginTop: 9, letterSpacing: "-0.01em" }}>{n.label}</span>
+              <span style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 3, letterSpacing: "0.03em" }}>{n.sub}</span>
             </button>
-          );
-        })}
+          ))}
+
+          {exiting && geom && !reduce && (
+            <span aria-hidden="true" className="cburst"
+              style={{
+                position: "absolute", left: geom.pts[exiting.i].x, top: geom.pts[exiting.i].y,
+                width: ORB, height: ORB, marginLeft: -ORB / 2, marginTop: -ORB / 2,
+                borderRadius: "50%", pointerEvents: "none", zIndex: 5,
+                background: `radial-gradient(circle, ${exiting.color} 0%, ${exiting.color}00 70%)`,
+              }} />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -575,7 +769,7 @@ function StockScreen({ items, go }) {
 
         {filtered.length === 0 ? (
           items.length === 0 ? (
-            <Empty icon={Boxes} title="No stock yet" desc="Add your first item and Vault will start tracking costs, profit and selling speed."
+            <Empty icon={Boxes} title="No stock yet" desc="Add your first item and Resell HQ will start tracking costs, profit and selling speed."
               action={<Btn kind="accent" onClick={() => go({ name: "edit", id: null })}><Plus size={16} /> Add first item</Btn>} />
           ) : (
             <Empty icon={Search} title="Nothing matches" desc="No items match the current search and filters." />
@@ -1044,7 +1238,7 @@ Respond with ONLY a JSON object:
 
             {step === 1 && (
               <>
-                <Banner icon={Camera}>Add photos of one product — front, back, labels, and any flaws. Vault reads them together and drafts an honest listing you can edit.</Banner>
+                <Banner icon={Camera}>Add photos of one product — front, back, labels, and any flaws. Resell HQ reads them together and drafts an honest listing you can edit.</Banner>
                 <Card style={{ marginBottom: 14 }}>
                   <PhotoGrid photos={photos} onRemove={(i) => setPhotos((p) => p.filter((_, x) => x !== i))} onAdd={addPhotos} />
                 </Card>
@@ -1655,7 +1849,7 @@ function AnalyticsScreen({ items, checks, go }) {
             )}
             <div style={{ ...display, fontWeight: 600, fontSize: 15, marginBottom: 10 }}>Buying decisions</div>
             {decisions.total === 0 ? (
-              <Banner icon={Info}>Use the Opportunity Checker before buying and Vault will track how accurate its calls were.</Banner>
+              <Banner icon={Info}>Use the Opportunity Checker before buying and Resell HQ will track how accurate its calls were.</Banner>
             ) : (
               <Card>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
@@ -1730,7 +1924,7 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      if (data.app !== "vault" || !Array.isArray(data.items)) throw new Error("That doesn't look like a Vault backup file.");
+      if (data.app !== "vault" || !Array.isArray(data.items)) throw new Error("That doesn't look like a Resell HQ backup file.");
       const result = await importData(data);
       toast(`Restored ${result.added} item${result.added === 1 ? "" : "s"}${result.skipped ? `, skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : ""}`);
     } catch (err2) { toast("Import failed: " + err2.message, true); }
@@ -1830,7 +2024,7 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
         </SectionBox>
 
         <div style={{ ...body, fontSize: 11.5, color: T.sec, textAlign: "center", marginTop: 10 }}>
-          Vault {APP_VERSION} · personal reselling app · resale estimates are always estimates, never guarantees
+          Resell HQ {APP_VERSION} · personal reselling app · resale estimates are always estimates, never guarantees
         </div>
       </div>
     </>
@@ -1981,9 +2175,12 @@ function AppShell({ isDesktop }) {
   const go = (s) => setScreen(s);
   const goObj = { go, params: screen };
 
+  /* The constellation is Home's own navigation, so BottomNav is hidden
+     there — and only there. onHome tracks the fallback branch too. */
   let content;
-  if (!loaded) content = <Spinner label="Loading your stock…" />;
-  else if (screen.name === "home") content = <HomeScreen go={go} items={items} />;
+  let onHome = false;
+  if (!loaded) { content = <Spinner label="Loading your stock…" />; onHome = screen.name === "home"; }
+  else if (screen.name === "home") { content = <HomeScreen go={go} items={items} />; onHome = true; }
   else if (screen.name === "stock") content = <StockScreen items={items} go={go} />;
   else if (screen.name === "detail") content = <DetailScreen items={items} go={goObj} updateItem={updateItem} deleteItem={deleteItem} duplicateItem={duplicateItem} toast={toast} />;
   else if (screen.name === "edit" || screen.name === "add") content = <EditScreen items={items} go={goObj} saveItem={saveItem} toast={toast} />;
@@ -1991,7 +2188,7 @@ function AppShell({ isDesktop }) {
   else if (screen.name === "checker") content = <CheckerScreen go={go} saveItem={saveItem} saveCheck={saveCheck} toast={toast} />;
   else if (screen.name === "analytics") content = <AnalyticsScreen items={items} checks={checks} go={go} />;
   else if (screen.name === "settings") content = <SettingsScreen items={items} checks={checks} go={go} importData={importData} wipeAll={wipeAll} toast={toast} />;
-  else content = <HomeScreen go={go} items={items} />;
+  else { content = <HomeScreen go={go} items={items} />; onHome = true; }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: T.bg, color: T.text, overflow: "hidden", position: "relative" }}>
@@ -2000,7 +2197,7 @@ function AppShell({ isDesktop }) {
         {content}
       </div>
       <Toast msg={toastMsg} />
-      <BottomNav screen={screen.name} go={go} />
+      {!onHome && <BottomNav screen={screen.name} go={go} />}
     </div>
   );
 }

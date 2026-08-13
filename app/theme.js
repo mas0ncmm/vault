@@ -30,16 +30,31 @@ export const T = {
 
 export const display = { fontFamily: "'Archivo', system-ui, sans-serif" };
 export const body = { fontFamily: "'Instrument Sans', system-ui, sans-serif" };
+export const mono = { fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" };
 
 export const globalCss = `
-  @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@200;500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap');
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; }
   .vscroll::-webkit-scrollbar { display: none; }
   .vscroll { scrollbar-width: none; }
   input, select, textarea, button { font-family: 'Instrument Sans', system-ui, sans-serif; }
   input:focus, select:focus, textarea:focus { outline: 2px solid rgba(74,200,255,0.5); outline-offset: 0; }
-  @media (prefers-reduced-motion: reduce) { .vanim { transition: none !important; } }
+
+  /* ---- constellation home ---- */
+  @keyframes orbBreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  @keyframes starTwinkle { 0%, 100% { opacity: var(--tw-op, 0.4); } 50% { opacity: 0.08; } }
+  @keyframes linePulse { 0%, 100% { opacity: 0.30; } 50% { opacity: 0.66; } }
+  @keyframes orbBurst { from { transform: scale(0.35); opacity: 0.9; } to { transform: scale(11); opacity: 0; } }
+  .cbreathe { animation: orbBreathe 4.4s ease-in-out infinite; }
+  .ctwinkle { animation: starTwinkle var(--tw-dur, 3.4s) ease-in-out infinite; }
+  .cpulse { animation: linePulse 5.2s ease-in-out infinite backwards; }
+  .cburst { animation: orbBurst 560ms cubic-bezier(.22,.7,.3,1) forwards; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .vanim { transition: none !important; }
+    .cbreathe, .ctwinkle, .cpulse, .cburst { animation: none !important; }
+  }
 `;
 
 /* ---------- constants ---------- */
