@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
+  AreaChart, Area, PieChart, Pie, Cell,
 } from "recharts";
 import {
   T, display, body, mono, globalCss,
@@ -15,12 +16,12 @@ import {
 } from "./theme";
 
 /* ============================================================
-   VAULT — personal Vinted reselling app (full build)
+   RESELL HQ — personal Vinted reselling app (full build)
    Stock tracker · Dashboard · AI listing generator ·
    AI opportunity checker · Analytics · Backup & CSV
    ============================================================ */
 
-const APP_VERSION = "v2.0 aurora";
+const APP_VERSION = "v3.0 clean";
 
 /* Unsold items idle past this many days render as "Quiet" instead of their status. */
 const STALE_DAYS = 60;
@@ -79,7 +80,7 @@ async function aiCallOnce(model, content, useSearch) {
   if (useSearch) bodyObj.tools = [{ type: "web_search_20250305", name: "web_search" }];
   const res = await fetch("/api/ai", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-vault-pass": await getPass() },
+    headers: { "Content-Type": "application/json", "x-resellhq-pass": await getPass() },
     body: JSON.stringify(bodyObj),
   });
   let data = null;
@@ -186,6 +187,7 @@ function downloadFile(name, content, type) {
 
 /* ---------- storage ---------- */
 const storageOK = typeof indexedDB !== "undefined";
+/* Storage keys still say "vault" on purpose: renaming them would orphan stock already saved on your phone. */
 const DB_NAME = "vault-db", DB_STORE = "kv";
 let dbPromise = null;
 function openDb() {
@@ -258,7 +260,7 @@ const btnBase = { border: "none", borderRadius: 14, cursor: "pointer", fontWeigh
 function Btn({ kind = "primary", children, style, disabled, ...p }) {
   const kinds = {
     primary: { background: T.text, color: T.bg },
-    accent: { background: T.accent, color: "#141210" },
+    accent: { background: T.accent, color: T.accentInk },
     ghost: { background: T.surface, color: T.text, border: `1px solid ${T.border}` },
     danger: { background: T.negSoft, color: T.neg, border: `1px solid ${T.negSoft}` },
   };
@@ -272,7 +274,7 @@ function Chip({ label, color, active, onClick, small }) {
   return (
     <button onClick={onClick} style={{
       background: active ? (color || T.text) : T.surface,
-      color: active ? T.bg : (color || T.sec),
+      color: active ? (color === T.accent ? T.accentInk : T.bg) : (color || T.sec),
       border: `1px solid ${active ? "transparent" : T.border}`,
       borderRadius: 999, padding: small ? "5px 10px" : "7px 13px",
       fontSize: small ? 11.5 : 12.5, fontWeight: 600, cursor: onClick ? "pointer" : "default",
@@ -378,7 +380,7 @@ function Spinner({ label }) {
 }
 function ScreenHeader({ title, onBack, right }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "calc(14px + env(safe-area-inset-top, 0px)) 18px 12px", position: "sticky", top: 0, background: "rgba(1,2,7,0.92)", backdropFilter: "blur(12px)", zIndex: 10, borderBottom: `1px solid ${T.border}` }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "calc(14px + env(safe-area-inset-top, 0px)) 18px 12px", position: "sticky", top: 0, background: "rgba(11,11,12,0.9)", backdropFilter: "blur(12px)", zIndex: 10, borderBottom: `1px solid ${T.border}` }}>
       {onBack && (
         <button onClick={onBack} aria-label="Back" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", color: T.text, cursor: "pointer", flexShrink: 0 }}>
           <ChevronLeft size={18} />
@@ -424,396 +426,920 @@ function PhotoGrid({ photos, onRemove, onAdd, max = 6 }) {
 }
 
 /* ============================================================
-   HOME — constellation
-   The four features are the navigation here: four glowing orbs
-   wired into a ring, with the all-time profit figure at the
-   centre of it. BottomNav is hidden on this screen only.
+   PRICE CHECK
+   Real sold prices beat AI guesses. These build links straight
+   to eBay sold listings / Vinted search for an item, and work
+   out what you've actually sold similar items for.
    ============================================================ */
+const STOP = new Set(["the","and","a","an","of","for","with","in","uk","eu","us","size","mens","men","womens","women","new","used"]);
+const tokens = (s) => clean(s).toLowerCase().replace(/[^a-z0-9.]+/g, " ").split(" ").filter((w) => w.length > 1 && !STOP.has(w));
+const priceQuery = (it, withSize = true) => [it.brand && !clean(it.name).toLowerCase().includes(clean(it.brand).toLowerCase()) ? it.brand : "", it.name || it.title, withSize && it.size ? it.size : ""].filter(Boolean).join(" ").trim();
+const ebaySoldUrl = (q) => "https://www.ebay.co.uk/sch/i.html?_nkw=" + encodeURIComponent(q) + "&LH_Sold=1&LH_Complete=1&_sop=13";
+const vintedUrl = (q) => "https://www.vinted.co.uk/catalog?search_text=" + encodeURIComponent(q) + "&order=newest_first";
 
-/* Index order matters — RING wires the orbs together by index. */
-/* Subtitles are kept short on purpose: Stock and Numbers sit at almost the
-   same height as the centre figure, so a wide label column would collide
-   with it on a phone. See ORB_COL. */
-const NODES = [
-  { id: "stock",     screen: "stock",     label: "Stock",   sub: "in · out · net", color: T.a1, left: 15, top: 46 },
-  { id: "generator", screen: "generator", label: "Listing", sub: "photo to copy",  color: T.a2, left: 40, top: 19 },
-  { id: "checker",   screen: "checker",   label: "Checker", sub: "buy or walk",    color: T.a4, left: 60, top: 80 },
-  { id: "analytics", screen: "analytics", label: "Numbers", sub: "what pays",      color: T.a5, left: 85, top: 44 },
-];
-const RING = [[0, 1], [1, 3], [3, 2], [2, 0]];
-const ORB = 68;
-/* Label column width. The outer orbs sit at 15%/85%, so this has to stay
-   narrow enough that their labels clear the centre figure's lane. */
-const ORB_COL = 88;
-/* Horizontal room left for the centre figure between the 15% and 85%
-   columns: (85% - 15%) of the width, minus one label column, minus a gutter. */
-const LANE = `calc(70% - ${ORB_COL + 8}px)`;
-const LANE_VW = `calc(70vw - ${ORB_COL + 8}px)`;
-const STAR_COUNT = 300;
-const EXIT_MS = 520;
-
-function useReducedMotion() {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => setReduce(!!mq.matches);
-    sync();
-    if (mq.addEventListener) { mq.addEventListener("change", sync); return () => mq.removeEventListener("change", sync); }
-    mq.addListener(sync);
-    return () => mq.removeListener(sync);
-  }, []);
-  return reduce;
+function similarSold(items, it, excludeId) {
+  const q = tokens([it.brand, it.name || it.title].join(" "));
+  if (!q.length) return null;
+  const qs = new Set(q);
+  const hits = items.filter((x) => {
+    if (x.id === excludeId || x.status !== "Sold" || !has(x.actualPrice)) return false;
+    const xt = new Set(tokens([x.brand, x.name || x.title].join(" ")));
+    let overlap = 0;
+    qs.forEach((w) => { if (xt.has(w)) overlap++; });
+    return overlap / qs.size >= 0.6;
+  });
+  if (!hits.length) return null;
+  const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const days = hits.map((x) => calc(x).daysToSell).filter((d) => d != null);
+  return {
+    count: hits.length,
+    avgPrice: avg(hits.map((x) => num(x.actualPrice))),
+    avgProfit: avg(hits.map((x) => calc(x).profit || 0)),
+    low: Math.min(...hits.map((x) => num(x.actualPrice))),
+    high: Math.max(...hits.map((x) => num(x.actualPrice))),
+    avgDays: days.length ? Math.round(avg(days)) : null,
+  };
 }
 
-/* Positions are random, so this must never render during SSR — the caller
-   gates it behind a mounted flag. useMemo keeps them stable across
-   re-renders once the client has picked them. */
-function Starfield({ reduce }) {
-  const stars = useMemo(() => Array.from({ length: STAR_COUNT }, (_, i) => ({
-    x: +(Math.random() * 100).toFixed(3),
-    y: +(Math.random() * 100).toFixed(3),
-    size: +(Math.random() * 1.7 + 0.6).toFixed(2),
-    op: +(Math.random() * 0.5 + 0.12).toFixed(2),
-    twinkle: i % 6 === 0,
-    dur: +(Math.random() * 2.8 + 2.4).toFixed(2),
-    delay: +(Math.random() * 6).toFixed(2),
-  })), []);
+function PriceCheck({ items, it, compact }) {
+  const q = priceQuery(it, true);
+  const qNoSize = priceQuery(it, false);
+  const mine = similarSold(items, it, it.id);
+  if (!qNoSize) return null;
+  const linkStyle = { flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, textDecoration: "none", borderRadius: 12, padding: compact ? "10px 10px" : "12px 12px", fontSize: 13.5, fontWeight: 600 };
   return (
-    <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-      {stars.map((s, i) => (
-        <span key={i} className={s.twinkle && !reduce ? "ctwinkle" : undefined}
-          style={{
-            position: "absolute", left: `${s.x}%`, top: `${s.y}%`,
-            width: s.size, height: s.size, borderRadius: "50%",
-            background: T.text, opacity: s.op,
-            "--tw-op": s.op, "--tw-dur": `${s.dur}s`,
-            animationDelay: `${s.delay}s`,
-          }} />
-      ))}
-    </div>
-  );
-}
-
-function HomeScreen({ go, items }) {
-  const reduce = useReducedMotion();
-  const [mounted, setMounted] = useState(false);
-  const [geom, setGeom] = useState(null);
-  const [drawn, setDrawn] = useState(false);
-  const [exiting, setExiting] = useState(null);
-  const wrapRef = useRef(null);
-  const orbRefs = useRef([]);
-  const exitTimer = useRef(null);
-
-  useEffect(() => setMounted(true), []);
-  useEffect(() => () => clearTimeout(exitTimer.current), []);
-
-  /* Lines are drawn between the orbs' real on-screen centres rather than
-     recomputed from the percentages, so they stay true at any viewport. */
-  useEffect(() => {
-    const measure = () => {
-      const wrap = wrapRef.current;
-      if (!wrap) return;
-      const wb = wrap.getBoundingClientRect();
-      if (!wb.width || !wb.height) return;
-      const pts = NODES.map((_, i) => {
-        const el = orbRefs.current[i];
-        if (!el) return null;
-        const b = el.getBoundingClientRect();
-        return { x: b.left - wb.left + b.width / 2, y: b.top - wb.top + b.height / 2 };
-      });
-      if (pts.some((p) => !p)) return;
-      setGeom({ w: wb.width, h: wb.height, pts });
-    };
-    const raf = requestAnimationFrame(measure);
-    window.addEventListener("resize", measure);
-    window.addEventListener("orientationchange", measure);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", measure);
-      window.removeEventListener("orientationchange", measure);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!geom || drawn) return;
-    if (reduce) { setDrawn(true); return; }
-    const raf = requestAnimationFrame(() => setDrawn(true));
-    return () => cancelAnimationFrame(raf);
-  }, [geom, drawn, reduce]);
-
-  const soldItems = items.filter((i) => i.status === "Sold");
-  const soldProfit = soldItems.reduce((s, i) => s + (calc(i).profit || 0), 0);
-  const profitText = gbp(soldProfit);
-  /* The spec size, but never wider than the lane between the outer orbs —
-     a long figure (or a narrow phone) would otherwise overrun their labels.
-     1.62 is the measured size-to-advance ratio for tabular digits here
-     (~0.59em per glyph, measured against the system fallback, which is
-     wider than Archivo — so this stays safe once the webfont loads). */
-  const figSize = `min(clamp(40px, 9vh, 58px), calc(${LANE_VW} / ${Math.max(5, profitText.length)} * 1.62))`;
-  const unsold = items.filter((i) => UNSOLD.includes(i.status));
-  const invested = unsold.reduce((s, i) => s + calc(i).tpc, 0);
-
-  const lines = geom ? RING.map(([a, b], i) => {
-    const p = geom.pts[a], q = geom.pts[b];
-    return { i, a, b, p, q, len: Math.hypot(q.x - p.x, q.y - p.y) };
-  }) : [];
-
-  const tap = (n, i) => {
-    if (exiting) return;
-    if (reduce || !geom) { go({ name: n.screen }); return; }
-    setExiting({ i, color: n.color, screen: n.screen });
-    exitTimer.current = setTimeout(() => go({ name: n.screen }), EXIT_MS);
-  };
-
-  const stage = {
-    position: "absolute", inset: 0,
-    transform: exiting ? "scale(2.6)" : "scale(1)",
-    opacity: exiting ? 0 : 1,
-    transformOrigin: exiting && geom ? `${geom.pts[exiting.i].x}px ${geom.pts[exiting.i].y}px` : "50% 48%",
-    /* Accelerating, but not so back-loaded that the zoom lands after we
-       navigate — at ~85% of EXIT_MS this is already most of the way to 2.6. */
-    transition: reduce ? "none" : `transform ${EXIT_MS}ms cubic-bezier(.42,0,1,1), opacity ${EXIT_MS}ms cubic-bezier(.4,0,.7,1)`,
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100%" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "calc(22px + env(safe-area-inset-top, 0px)) 18px 0", flexShrink: 0 }}>
-        <div>
-          <div style={{ ...display, fontWeight: 700, fontSize: 26, letterSpacing: "-0.02em", color: T.text }}>Resell HQ</div>
-          <div style={{ ...body, fontSize: 13.5, color: T.sec, marginTop: 3 }}>Tap a light to begin · <b style={{ color: T.accent }}>{APP_VERSION}</b></div>
+    <div>
+      {mine && (
+        <div style={{ ...body, fontSize: 13, color: T.sec, marginBottom: 10, lineHeight: 1.5 }}>
+          You've sold <b style={{ color: T.text }}>{mine.count}</b> like this for <b style={{ color: T.text }}>{gbp(mine.avgPrice)}</b> avg
+          {mine.count > 1 ? ` (${gbp(mine.low)}–${gbp(mine.high)})` : ""}, <b style={{ color: mine.avgProfit >= 0 ? T.pos : T.neg }}>{gbp(mine.avgProfit)}</b> profit
+          {mine.avgDays != null ? `, ~${mine.avgDays}d to sell` : ""}.
         </div>
-        <button onClick={() => go({ name: "settings" })} aria-label="Settings" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", color: T.sec, cursor: "pointer", flexShrink: 0 }}>
-          <Settings size={18} />
-        </button>
-      </div>
-
-      <div ref={wrapRef} style={{ position: "relative", flex: 1, minHeight: 430, overflow: "hidden", marginTop: 6 }}>
-        {mounted && <Starfield reduce={reduce} />}
-
-        <div style={stage}>
-          {geom && (
-            <svg width={geom.w} height={geom.h} viewBox={`0 0 ${geom.w} ${geom.h}`} aria-hidden="true"
-              style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
-              <defs>
-                {lines.map((l) => (
-                  <linearGradient key={l.i} id={`cline${l.i}`} gradientUnits="userSpaceOnUse" x1={l.p.x} y1={l.p.y} x2={l.q.x} y2={l.q.y}>
-                    <stop offset="0%" stopColor={NODES[l.a].color} stopOpacity="0.9" />
-                    <stop offset="50%" stopColor={T.a3} stopOpacity="0.5" />
-                    <stop offset="100%" stopColor={NODES[l.b].color} stopOpacity="0.9" />
-                  </linearGradient>
-                ))}
-              </defs>
-              {lines.map((l) => {
-                const animating = drawn && !reduce;
-                return (
-                  <line key={l.i} x1={l.p.x} y1={l.p.y} x2={l.q.x} y2={l.q.y}
-                    stroke={`url(#cline${l.i})`} strokeWidth={1} strokeLinecap="round"
-                    className={animating ? "cpulse" : undefined}
-                    style={{
-                      strokeDasharray: l.len,
-                      strokeDashoffset: drawn ? 0 : l.len,
-                      transition: reduce ? "none" : `stroke-dashoffset 1000ms ease ${180 + l.i * 160}ms`,
-                      animationDelay: `${1250 + l.i * 160}ms`,
-                      ...(animating ? null : { opacity: 0.42 }),
-                    }} />
-                );
-              })}
-            </svg>
-          )}
-
-          {/* Width is pinned to the clear lane between the 15% and 85% orb
-              columns so the figure never runs into their labels. */}
-          <div style={{ position: "absolute", left: "50%", top: "47%", transform: "translate(-50%, -50%)", textAlign: "center", pointerEvents: "none", width: `min(${LANE}, 300px)` }}>
-            <div style={{ ...body, fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase", color: T.dim, fontWeight: 500 }}>Profit · all time</div>
-            <div style={{ ...display, fontSize: figSize, fontWeight: 200, lineHeight: 1.04, margin: "8px 0 10px", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: soldProfit > 0 ? T.pos : soldProfit < 0 ? T.neg : T.text }}>
-              {profitText}
-            </div>
-            {/* No separator glyphs: the lane is narrow enough that this row
-                wraps, and standalone separators dangle at the line end. */}
-            <div style={{ ...mono, fontSize: 10.5, color: T.dim, display: "flex", justifyContent: "center", alignItems: "center", gap: "6px 14px", flexWrap: "wrap" }}>
-              <span style={{ whiteSpace: "nowrap" }}>Shelf {unsold.length}</span>
-              <span style={{ whiteSpace: "nowrap" }}>Tied up {gbp(invested)}</span>
-              <span style={{ whiteSpace: "nowrap" }}>Sold {soldItems.length}</span>
-            </div>
-          </div>
-
-          {NODES.map((n, i) => (
-            <button key={n.id} onClick={() => tap(n, i)} aria-label={`${n.label} — ${n.sub}`}
-              style={{
-                position: "absolute", left: `${n.left}%`, top: `${n.top}%`, transform: "translate(-50%, -50%)",
-                display: "flex", flexDirection: "column", alignItems: "center",
-                background: "none", border: "none", padding: 0, width: ORB_COL, color: T.text, cursor: "pointer", zIndex: 3,
-              }}>
-              <span ref={(el) => { orbRefs.current[i] = el; }} className={reduce ? undefined : "cbreathe"}
-                style={{
-                  display: "block", width: ORB, height: ORB, borderRadius: "50%", flexShrink: 0,
-                  background: `radial-gradient(circle at 50% 46%, #FFFFFF 0%, ${n.color}CC 22%, ${n.color} 62%, transparent 74%)`,
-                  filter: `drop-shadow(0 0 18px ${n.color}) drop-shadow(0 0 52px ${n.color})`,
-                  animationDelay: `${i * 0.7}s`,
-                }} />
-              <span style={{ ...display, fontSize: 14, fontWeight: 600, marginTop: 9, letterSpacing: "-0.01em" }}>{n.label}</span>
-              <span style={{ ...mono, fontSize: 9.5, color: T.dim, marginTop: 3, letterSpacing: "0.03em" }}>{n.sub}</span>
-            </button>
-          ))}
-
-          {exiting && geom && !reduce && (
-            <span aria-hidden="true" className="cburst"
-              style={{
-                position: "absolute", left: geom.pts[exiting.i].x, top: geom.pts[exiting.i].y,
-                width: ORB, height: ORB, marginLeft: -ORB / 2, marginTop: -ORB / 2,
-                borderRadius: "50%", pointerEvents: "none", zIndex: 5,
-                background: `radial-gradient(circle, ${exiting.color} 0%, ${exiting.color}00 70%)`,
-              }} />
-          )}
-        </div>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <a href={ebaySoldUrl(q)} target="_blank" rel="noreferrer" className="vanim" style={{ ...linkStyle, background: T.text, color: T.bg }}>
+          <TrendingUp size={15} /> eBay sold
+        </a>
+        <a href={vintedUrl(qNoSize)} target="_blank" rel="noreferrer" className="vanim" style={{ ...linkStyle, background: T.raised, color: T.text, border: `1px solid ${T.border}` }}>
+          <Search size={15} /> Vinted
+        </a>
       </div>
     </div>
   );
 }
 
 /* ============================================================
-   STOCK LIST + DASHBOARD
+   SHEETS — quick add + quick sell
+   Bottom sheets so the two things done most often take seconds,
+   not a full form.
    ============================================================ */
-function StockScreen({ items, go }) {
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("All");
-  const [brand, setBrand] = useState("");
-  const [category, setCategory] = useState("");
-  const [sort, setSort] = useState("Newest");
-  const [showDash, setShowDash] = useState(true);
+function Sheet({ title, onClose, children }) {
+  const wide = useLayout() !== "phone";
+  useEffect(() => {
+    const k = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, []);
+  return (
+    <div className="vfade" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 40, display: "flex", alignItems: wide ? "center" : "flex-end", justifyContent: "center", padding: wide ? 24 : 0 }}>
+      <div className={wide ? "vfade" : "vsheet"} onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 520, maxHeight: "92%", overflowY: "auto", background: T.surface, border: wide ? `1px solid ${T.border}` : "none", borderTop: `1px solid ${T.border}`, borderRadius: wide ? 22 : "22px 22px 0 0", padding: wide ? "22px 24px 24px" : "10px 18px calc(18px + env(safe-area-inset-bottom, 0px))", boxShadow: wide ? "0 24px 60px rgba(0,0,0,0.5)" : "none" }}>
+        {!wide && <div style={{ width: 38, height: 4, borderRadius: 4, background: T.border, margin: "0 auto 14px" }} />}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <div style={{ ...display, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em" }}>{title}</div>
+          <button onClick={onClose} aria-label="Close" style={{ background: T.raised, border: "none", borderRadius: 10, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", color: T.sec, cursor: "pointer" }}>
+            <X size={17} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
 
-  const brands = useMemo(() => [...new Set(items.map((i) => i.brand).filter(Boolean))].sort(), [items]);
-  const cats = useMemo(() => [...new Set(items.map((i) => i.category).filter(Boolean))].sort(), [items]);
+const bigInput = { width: "100%", background: T.raised, border: `1px solid ${T.border}`, borderRadius: 14, color: T.text, fontSize: 17, padding: "14px 14px" };
+const moneyWrap = (input) => (
+  <div style={{ position: "relative" }}>
+    <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: T.sec, fontSize: 17 }}>£</span>
+    {input}
+  </div>
+);
+const miniLabel = { ...body, fontSize: 12, color: T.sec, fontWeight: 600, marginBottom: 6, letterSpacing: "0.02em" };
+
+function QuickAddSheet({ items, onClose, saveItem, toast, openFull }) {
+  const [name, setName] = useState("");
+  const [paid, setPaid] = useState("");
+  const [size, setSize] = useState("");
+  const [target, setTarget] = useState("");
+  const [added, setAdded] = useState(0);
+  const nameRef = useRef(null);
+
+  useEffect(() => { setTimeout(() => nameRef.current && nameRef.current.focus(), 250); }, []);
+
+  const pastNames = useMemo(() => [...new Set(items.map((i) => i.name).filter(Boolean))].slice(0, 200), [items]);
+  const recentSizes = useMemo(() => {
+    const seen = [];
+    for (const i of items) { const s = clean(i.size).trim(); if (s && !seen.includes(s)) seen.push(s); if (seen.length >= 8) break; }
+    return seen;
+  }, [items]);
+  const last = items[0];
+  const mine = name.trim().length > 2 ? similarSold(items, { name }, null) : null;
+
+  const build = () => ({
+    ...blankItem(),
+    name: name.trim(), size: size.trim(), purchasePrice: paid, expectedPrice: target,
+    purchaseDate: todayISO(), status: "Purchased",
+    brand: (items.find((i) => i.name === name.trim()) || {}).brand || "",
+  });
+
+  const add = async (keepOpen) => {
+    if (!name.trim()) { toast("Type what it is first", true); nameRef.current && nameRef.current.focus(); return; }
+    try {
+      await saveItem(build(), null);
+      toast(keepOpen ? `Added — ${added + 1} this go` : "Added to stock");
+      if (keepOpen) { setAdded((n) => n + 1); setSize(""); }
+      else onClose();
+    } catch (e) { toast("Save failed: " + e.message, true); }
+  };
+
+  return (
+    <Sheet title="Add stock" onClose={onClose}>
+      {last && !name && (
+        <button onClick={() => { setName(last.name || ""); setPaid(clean(last.purchasePrice)); setSize(clean(last.size)); setTarget(clean(last.expectedPrice)); }}
+          className="vanim" style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, background: T.raised, border: `1px dashed ${T.border}`, borderRadius: 14, padding: "11px 13px", marginBottom: 14, cursor: "pointer", color: T.text, textAlign: "left" }}>
+          <Copy size={16} color={T.sec} />
+          <span style={{ ...body, fontSize: 13.5, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            Same as last: <b>{last.name}</b>{last.size ? ` · ${last.size}` : ""}{has(last.purchasePrice) ? ` · ${gbp(num(last.purchasePrice))}` : ""}
+          </span>
+        </button>
+      )}
+
+      <div style={miniLabel}>WHAT IS IT</div>
+      <input ref={nameRef} list="resellhq-names" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Nike Dunk Low Panda"
+        onKeyDown={(e) => { if (e.key === "Enter") add(false); }} style={{ ...bigInput, marginBottom: 14 }} />
+      <datalist id="resellhq-names">{pastNames.map((n) => <option key={n} value={n} />)}</datalist>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+        <div>
+          <div style={miniLabel}>PAID</div>
+          {moneyWrap(<input value={paid} onChange={(e) => setPaid(e.target.value)} inputMode="decimal" placeholder="0" style={{ ...bigInput, paddingLeft: 30 }} />)}
+        </div>
+        <div>
+          <div style={miniLabel}>AIM TO SELL FOR</div>
+          {moneyWrap(<input value={target} onChange={(e) => setTarget(e.target.value)} inputMode="decimal" placeholder="optional" style={{ ...bigInput, paddingLeft: 30 }} />)}
+        </div>
+      </div>
+
+      <div style={miniLabel}>SIZE</div>
+      <div className="vscroll" style={{ display: "flex", gap: 7, overflowX: "auto", marginBottom: 8 }}>
+        {recentSizes.map((s) => <Chip key={s} label={s} active={size === s} onClick={() => setSize(size === s ? "" : s)} color={T.accent} />)}
+      </div>
+      <input value={size} onChange={(e) => setSize(e.target.value)} placeholder="or type a size (optional)" style={{ ...bigInput, fontSize: 15, padding: "11px 13px", marginBottom: 16 }} />
+
+      {name.trim().length > 2 && (
+        <Card style={{ marginBottom: 16, padding: 14, background: T.bg }}>
+          <div style={{ ...miniLabel, marginBottom: 10 }}>WHAT'S IT WORTH</div>
+          <PriceCheck items={items} it={{ name, size }} compact />
+          {!mine && <div style={{ ...body, fontSize: 12, color: T.dim, marginTop: 8 }}>No sales of this yet — your own numbers show up here once you've sold one.</div>}
+        </Card>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn kind="accent" style={{ flex: 1.4, fontSize: 15.5, padding: "15px" }} onClick={() => add(false)}><Check size={17} /> Add</Btn>
+        <Btn kind="ghost" style={{ flex: 1, fontSize: 14 }} onClick={() => add(true)}><Plus size={16} /> Add + another</Btn>
+      </div>
+      <button onClick={() => openFull(build())} style={{ background: "none", border: "none", color: T.sec, ...body, fontSize: 13, fontWeight: 500, cursor: "pointer", width: "100%", marginTop: 14, padding: 4 }}>
+        Add photos or more details
+      </button>
+    </Sheet>
+  );
+}
+
+const K_SELLDEF = "vault-sell-defaults";
+const SELL_PLATFORMS = ["Vinted", "eBay", "Depop", "Other"];
+
+function SellSheet({ it, onClose, updateItem, toast }) {
+  const [platform, setPlatform] = useState(SELL_PLATFORMS.includes(it.platform) ? it.platform : "Vinted");
+  const [price, setPrice] = useState(clean(it.expectedPrice));
+  const [fees, setFees] = useState("");
+  const [post, setPost] = useState("");
+  const [defs, setDefs] = useState({});
+  const [showCosts, setShowCosts] = useState(false);
+  const priceRef = useRef(null);
+
+  useEffect(() => {
+    sGet(K_SELLDEF).then((d) => {
+      const all = d && typeof d === "object" ? d : {};
+      setDefs(all);
+      const mine = all[platform];
+      if (mine) { setFees(clean(mine.fees)); setPost(clean(mine.post)); }
+    });
+    setTimeout(() => priceRef.current && priceRef.current.focus(), 250);
+  }, []);
+
+  const pick = (p) => {
+    setPlatform(p);
+    const d = defs[p];
+    setFees(d ? clean(d.fees) : "");
+    setPost(d ? clean(d.post) : "");
+  };
+
+  const preview = calc({ ...it, status: "Sold", actualPrice: price, platformFees: fees, sellerPostage: post });
+
+  const confirm = async () => {
+    if (!has(price)) { toast("What did it sell for?", true); priceRef.current && priceRef.current.focus(); return; }
+    const today = todayISO();
+    await updateItem({
+      ...it, status: "Sold", platform, actualPrice: price, platformFees: fees, sellerPostage: post,
+      saleDate: today, listingDate: it.listingDate || it.purchaseDate || "", updatedAt: Date.now(),
+    });
+    try { await sSet(K_SELLDEF, { ...defs, [platform]: { fees, post } }); } catch {}
+    toast(preview.profit != null ? `Sold — ${gbp(preview.profit)} profit` : "Marked as sold");
+    onClose();
+  };
+
+  return (
+    <Sheet title="Sold it" onClose={onClose}>
+      <div style={{ ...body, fontSize: 14, color: T.sec, marginBottom: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {it.name || it.title}{it.size ? ` · ${it.size}` : ""}
+      </div>
+      <div style={{ display: "flex", gap: 7, marginBottom: 14, flexWrap: "wrap" }}>
+        {SELL_PLATFORMS.map((p) => <Chip key={p} label={p} active={platform === p} onClick={() => pick(p)} color={T.accent} />)}
+      </div>
+      <div style={miniLabel}>SOLD FOR</div>
+      {moneyWrap(<input ref={priceRef} value={price} onChange={(e) => setPrice(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") confirm(); }}
+        inputMode="decimal" placeholder="0" style={{ ...bigInput, fontSize: 26, fontWeight: 700, paddingLeft: 32, ...display }} />)}
+
+      <button onClick={() => setShowCosts(!showCosts)} style={{ background: "none", border: "none", color: T.sec, ...body, fontSize: 13, fontWeight: 500, cursor: "pointer", padding: "12px 0 4px" }}>
+        {showCosts ? "Hide costs" : `Fees & postage${has(fees) || has(post) ? `: ${gbp(num(fees) + num(post))}` : " (optional)"}`}
+      </button>
+      {showCosts && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 6 }}>
+          <div>
+            <div style={miniLabel}>FEES</div>
+            {moneyWrap(<input value={fees} onChange={(e) => setFees(e.target.value)} inputMode="decimal" placeholder="0" style={{ ...bigInput, fontSize: 15, paddingLeft: 30 }} />)}
+          </div>
+          <div>
+            <div style={miniLabel}>POSTAGE YOU PAID</div>
+            {moneyWrap(<input value={post} onChange={(e) => setPost(e.target.value)} inputMode="decimal" placeholder="0" style={{ ...bigInput, fontSize: 15, paddingLeft: 30 }} />)}
+          </div>
+          <div style={{ ...body, gridColumn: "1 / -1", fontSize: 11.5, color: T.dim }}>Remembered for next time you sell on {platform}.</div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 14, padding: "14px 16px", margin: "16px 0" }}>
+        <span style={{ ...body, fontSize: 13.5, color: T.sec }}>Profit</span>
+        <span style={{ ...display, fontSize: 24, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: !has(price) ? T.dim : preview.profit >= 0 ? T.pos : T.neg }}>
+          {has(price) ? gbp(preview.profit) : "—"}
+        </span>
+      </div>
+      <Btn kind="accent" style={{ width: "100%", fontSize: 15.5, padding: "15px" }} onClick={confirm}><Check size={17} /> Confirm sale</Btn>
+    </Sheet>
+  );
+}
+
+/* ============================================================
+   ITEM ROW — shared by Home and Stock
+   ============================================================ */
+function ItemRow({ it, onOpen, onSell }) {
+  const c = calc(it);
+  const initial = clean(it.brand || it.name || "?").trim().charAt(0).toUpperCase() || "?";
+  const meta = [it.size, c.sold ? it.platform : null, c.age != null ? `${c.age}d` : null].filter(Boolean).join(" · ");
+  return (
+    <div onClick={onOpen} className="vanim" style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, cursor: "pointer" }}>
+      <div style={{ width: 46, height: 46, borderRadius: 12, background: T.raised, flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", ...display, fontWeight: 700, fontSize: 17, color: T.sec }}>
+        {it.thumb ? <img src={it.thumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initial}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ ...body, fontWeight: 600, fontSize: 14.5, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.name || it.title || "Untitled"}</div>
+        <div style={{ ...body, fontSize: 12.5, color: c.age != null && c.age > STALE_DAYS ? T.a2 : T.sec, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {meta || (c.sold ? "Sold" : "In stock")}
+        </div>
+      </div>
+      <div style={{ textAlign: "right", flexShrink: 0 }}>
+        {c.sold ? (
+          <div style={{ ...display, fontWeight: 700, fontSize: 15.5, color: c.profit >= 0 ? T.pos : T.neg, fontVariantNumeric: "tabular-nums" }}>{c.profit >= 0 ? "+" : ""}{gbp(c.profit)}</div>
+        ) : (
+          <div style={{ ...display, fontWeight: 600, fontSize: 14.5, color: T.sec, fontVariantNumeric: "tabular-nums" }}>{has(it.purchasePrice) ? gbp(c.tpc) : "—"}</div>
+        )}
+      </div>
+      {onSell && UNSOLD.includes(it.status) && (
+        <button onClick={(e) => { e.stopPropagation(); onSell(it.id); }} className="vanim"
+          style={{ background: T.accentSoft, color: T.accent, border: `1px solid ${T.accentLine}`, borderRadius: 10, padding: "8px 11px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
+          Sold
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   LAYOUT — phone / tablet / laptop
+   Under 768px: phone layout with bottom nav. 768–1099px: icon
+   rail sidebar. 1100px+: full sidebar and dashboard grid.
+   ============================================================ */
+const LayoutCtx = React.createContext("phone");
+const useLayout = () => React.useContext(LayoutCtx);
+function useViewportMode() {
+  const [mode, setMode] = useState("phone");
+  useEffect(() => {
+    const f = () => { const w = window.innerWidth; setMode(w >= 1100 ? "desktop" : w >= 768 ? "tablet" : "phone"); };
+    f();
+    window.addEventListener("resize", f);
+    return () => window.removeEventListener("resize", f);
+  }, []);
+  return mode;
+}
+
+function Logo({ size = 26 }) {
+  return (
+    <span style={{ ...display, fontWeight: 800, fontSize: size, letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>
+      Resell <span style={{ color: T.accent }}>HQ</span>
+    </span>
+  );
+}
+
+const NAV = [
+  { id: "home", label: "Dashboard", icon: Home },
+  { id: "stock", label: "Stock", icon: Package },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "generator", label: "Listing writer", icon: Sparkles },
+  { id: "checker", label: "Buy checker", icon: ScanSearch },
+];
+function Sidebar({ screen, go, openAdd, compact }) {
+  const isActive = (id) => screen === id || (id === "stock" && ["detail", "edit"].includes(screen));
+  const NavBtn = ({ n }) => {
+    const Icon = n.icon;
+    const on = isActive(n.id);
+    return (
+      <button onClick={() => go({ name: n.id })} title={n.label} className="vanim" style={{
+        display: "flex", alignItems: "center", justifyContent: compact ? "center" : "flex-start", gap: 12, width: "100%",
+        background: on ? T.accentSoft : "none", color: on ? T.accent : T.sec, border: "none",
+        borderLeft: `3px solid ${on ? T.accent : "transparent"}`, borderRadius: 10,
+        padding: compact ? "12px 0" : "11px 14px", fontSize: 14.5, fontWeight: on ? 600 : 500, cursor: "pointer",
+      }}>
+        <Icon size={19} strokeWidth={on ? 2.4 : 2} />{!compact && n.label}
+      </button>
+    );
+  };
+  return (
+    <div style={{ width: compact ? 76 : 236, flexShrink: 0, background: T.surface, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", padding: compact ? "22px 10px" : "26px 16px", gap: 4 }}>
+      <div style={{ padding: compact ? "0 0 22px" : "0 8px 26px", textAlign: compact ? "center" : "left" }}>
+        {compact ? <span style={{ ...display, fontWeight: 800, fontSize: 20, color: T.accent }}>HQ</span> : <Logo size={28} />}
+      </div>
+      {NAV.map((n) => <NavBtn key={n.id} n={n} />)}
+      <Btn kind="accent" onClick={openAdd} style={{ marginTop: 16, width: "100%", padding: compact ? "12px 0" : "12px 14px" }}>
+        <Plus size={18} />{!compact && "Add item"}
+      </Btn>
+      <div style={{ flex: 1 }} />
+      <NavBtn n={{ id: "settings", label: "Settings", icon: Settings }} />
+    </div>
+  );
+}
+
+/* ---------- dashboard numbers ---------- */
+const DAY = 86400000;
+function ago(ts) {
+  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (m < 60) return m <= 1 ? "just now" : `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  return d < 30 ? `${d}d ago` : fmtDate(new Date(ts));
+}
+const saleTs = (i) => {
+  const d = Date.parse(i.saleDate);
+  if (!isFinite(d)) return i.updatedAt || 0;
+  return new Date(i.updatedAt || 0).toISOString().slice(0, 10) === i.saleDate ? i.updatedAt : d + 12 * 3600000;
+};
+const deltaPct = (now, before) => (before > 0 ? ((now - before) / before) * 100 : null);
+
+function dashData(items) {
+  const active = items.filter((i) => i.status !== "Archived");
+  const unsold = active.filter((i) => UNSOLD.includes(i.status));
+  const sold = active.filter((i) => i.status === "Sold" && has(i.actualPrice));
+  const now = Date.now();
+  const inLast = (i, from, to = 0) => { const t = saleTs(i); return t > now - from * DAY && t <= now - to * DAY; };
+  const s30 = sold.filter((i) => inLast(i, 30));
+  const sPrev30 = sold.filter((i) => inLast(i, 60, 30));
+  const sum = (arr, f) => arr.reduce((a, i) => a + f(i), 0);
+  const prof = (i) => calc(i).profit || 0;
+  const ym = todayISO().slice(0, 7);
+  const lastD = new Date(); lastD.setDate(1); lastD.setMonth(lastD.getMonth() - 1);
+  const lym = lastD.toISOString().slice(0, 7);
+  const monthSold = sold.filter((i) => clean(i.saleDate).slice(0, 7) === ym);
+  const lastMonthSold = sold.filter((i) => clean(i.saleDate).slice(0, 7) === lym);
+
+  const daily = [];
+  for (let k = 29; k >= 0; k--) {
+    const day = new Date(now - k * DAY).toISOString().slice(0, 10);
+    const ds = sold.filter((i) => i.saleDate === day);
+    daily.push({ day: new Date(day).toLocaleDateString("en-GB", { day: "numeric", month: "short" }), revenue: sum(ds, (i) => num(i.actualPrice)), profit: sum(ds, prof) });
+  }
+  const platMap = {};
+  s30.forEach((i) => { const p = i.platform || "Other"; platMap[p] = (platMap[p] || 0) + num(i.actualPrice); });
+  const platforms = Object.entries(platMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+
+  const topMap = {};
+  s30.forEach((i) => {
+    const key = clean(i.name || i.title).trim().toLowerCase();
+    if (!key) return;
+    const t = topMap[key] || (topMap[key] = { name: i.name || i.title, count: 0, revenue: 0, thumb: i.thumb });
+    t.count++; t.revenue += num(i.actualPrice); if (!t.thumb && i.thumb) t.thumb = i.thumb;
+  });
+  const top = Object.values(topMap).sort((a, b) => b.count - a.count || b.revenue - a.revenue).slice(0, 4);
+
+  const events = [];
+  active.forEach((i) => {
+    if (i.status === "Sold" && has(i.actualPrice)) events.push({ type: "sold", ts: saleTs(i), it: i, amount: num(i.actualPrice) });
+    if (OWNED.includes(i.status)) events.push({ type: "new", ts: i.createdAt || 0, it: i, amount: calc(i).tpc });
+  });
+  events.sort((a, b) => b.ts - a.ts);
+
+  return {
+    unsold, sold,
+    stockCost: sum(unsold, (i) => calc(i).tpc),
+    newThisWeek: unsold.filter((i) => (i.createdAt || 0) > now - 7 * DAY).length,
+    sales30: sum(s30, (i) => num(i.actualPrice)), salesPrev30: sum(sPrev30, (i) => num(i.actualPrice)),
+    profit30: sum(s30, prof), profitPrev30: sum(sPrev30, prof),
+    profitMonth: sum(monthSold, prof), profitLastMonth: sum(lastMonthSold, prof), soldMonth: monthSold.length,
+    daily, platforms, top, events,
+    recentSales: [...sold].sort((a, b) => saleTs(b) - saleTs(a)),
+    quiet: unsold.filter((i) => (calc(i).age || 0) > 30).sort((a, b) => (calc(b).age || 0) - (calc(a).age || 0)),
+  };
+}
+
+/* ---------- dashboard pieces ---------- */
+function Delta({ pct: p, suffix = "" }) {
+  if (p == null || !isFinite(p)) return null;
+  const up = p >= 0;
+  return <span style={{ ...body, fontSize: 12.5, fontWeight: 600, color: up ? T.pos : T.neg, whiteSpace: "nowrap" }}>{up ? "▲" : "▼"} {Math.abs(p).toFixed(0)}%{suffix}</span>;
+}
+function IconTile({ icon: Icon, size = 38 }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: 11, background: T.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <Icon size={size * 0.5} color={T.accent} />
+    </div>
+  );
+}
+function Panel({ title, right, children, style, pad = 18 }) {
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: pad, minWidth: 0, ...style }}>
+      {(title || right) && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+          <div style={{ ...display, fontWeight: 700, fontSize: 16.5 }}>{title}</div>
+          {right}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+const SeeAll = ({ onClick }) => <button onClick={onClick} style={{ background: "none", border: "none", color: T.sec, ...body, fontSize: 13, fontWeight: 500, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 2 }}>See all <ChevronRight size={14} /></button>;
+const RangeTag = ({ label = "Last 30 days" }) => <span style={{ ...body, fontSize: 12, color: T.sec, background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, padding: "5px 9px", whiteSpace: "nowrap" }}>{label}</span>;
+function Thumb({ it, size = 42 }) {
+  const initial = clean((it && (it.brand || it.name)) || "?").trim().charAt(0).toUpperCase() || "?";
+  return (
+    <div style={{ width: size, height: size, borderRadius: 10, background: T.raised, flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", ...display, fontWeight: 700, fontSize: size * 0.38, color: T.sec }}>
+      {it && it.thumb ? <img src={it.thumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initial}
+    </div>
+  );
+}
+
+function StatTile({ label, value, icon, delta, sub }) {
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "14px 14px", minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ ...body, fontSize: 12.5, color: T.sec }}>{label}</div>
+          <div style={{ ...display, fontSize: 24, fontWeight: 800, fontVariantNumeric: "tabular-nums", marginTop: 4, whiteSpace: "nowrap" }}>{value}</div>
+        </div>
+        {icon && <IconTile icon={icon} />}
+      </div>
+      {(delta != null || sub) && <div style={{ marginTop: 8, display: "flex", gap: 6, alignItems: "center" }}>{delta}{sub && <span style={{ ...body, fontSize: 12, color: T.dim }}>{sub}</span>}</div>}
+    </div>
+  );
+}
+
+function ActivityList({ events, go, limit }) {
+  if (!events.length) return <div style={{ ...body, fontSize: 13, color: T.dim }}>Nothing yet — add some stock.</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {events.slice(0, limit).map((e, k) => (
+        <div key={k} onClick={() => go({ name: "detail", id: e.it.id })} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderTop: k ? `1px solid ${T.border}` : "none", cursor: "pointer" }}>
+          {e.type === "sold" ? <TrendingUp size={17} color={T.pos} /> : <Package size={17} color={T.accent} />}
+          <Thumb it={e.it} size={40} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...body, fontWeight: 600, fontSize: 14 }}>{e.type === "sold" ? "Sold" : "New stock"}</div>
+            <div style={{ ...body, fontSize: 12.5, color: T.sec, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.it.name || e.it.title}</div>
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ ...display, fontWeight: 700, fontSize: 14.5, fontVariantNumeric: "tabular-nums", color: e.type === "sold" ? T.text : T.sec }}>{gbp(e.amount)}</div>
+            <div style={{ ...body, fontSize: 11.5, color: T.dim }}>{ago(e.ts)}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TopList({ top }) {
+  if (!top.length) return <div style={{ ...body, fontSize: 13, color: T.dim }}>No sales in the last 30 days.</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {top.map((t, k) => (
+        <div key={t.name} style={{ display: "flex", alignItems: "center", gap: 11, background: T.raised, borderRadius: 12, padding: "8px 11px" }}>
+          <span style={{ ...display, fontWeight: 700, fontSize: 13, color: T.sec, width: 22, height: 22, borderRadius: 999, border: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{k + 1}</span>
+          <Thumb it={t} size={36} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...body, fontWeight: 600, fontSize: 13.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
+            <div style={{ ...body, fontSize: 12, color: T.sec }}>{t.count} sold</div>
+          </div>
+          <div style={{ ...display, fontWeight: 700, fontSize: 14.5, fontVariantNumeric: "tabular-nums" }}>{gbp(t.revenue)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const chartTip = { contentStyle: { background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, fontSize: 12 }, labelStyle: { color: T.sec }, formatter: (v) => gbp(v) };
+const axis = { stroke: T.dim, fontSize: 11, tickLine: false, axisLine: false };
+const PLAT_COLORS = [T.accent, "#FF6B81", "#FF9AA8", "#C9C9CF", "#6B6B72"];
+
+function SalesChart({ daily }) {
+  return (
+    <div style={{ height: 190 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={daily} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
+          <defs>
+            <linearGradient id="rhqFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={T.accent} stopOpacity={0.45} />
+              <stop offset="100%" stopColor={T.accent} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke={T.border} vertical={false} />
+          <XAxis dataKey="day" {...axis} interval={6} />
+          <YAxis {...axis} tickFormatter={(v) => "£" + v} />
+          <Tooltip {...chartTip} />
+          <Area type="monotone" dataKey="revenue" name="Sales" stroke={T.accent} strokeWidth={2.2} fill="url(#rhqFill)" dot={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+function ProfitChart({ daily }) {
+  return (
+    <div style={{ height: 190 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={daily} margin={{ top: 6, right: 6, left: -14, bottom: 0 }} barGap={1}>
+          <CartesianGrid stroke={T.border} vertical={false} />
+          <XAxis dataKey="day" {...axis} interval={6} />
+          <YAxis {...axis} tickFormatter={(v) => "£" + v} />
+          <Tooltip {...chartTip} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
+          <Bar dataKey="revenue" name="Revenue" fill="#5A5A62" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="profit" name="Profit" fill={T.accent} radius={[3, 3, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+function PlatformDonut({ platforms, total }) {
+  if (!platforms.length) return <div style={{ ...body, fontSize: 13, color: T.dim }}>No sales in the last 30 days.</div>;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+      <div style={{ width: 150, height: 150, position: "relative", flexShrink: 0 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={platforms} dataKey="value" nameKey="name" innerRadius={50} outerRadius={72} paddingAngle={2} stroke="none">
+              {platforms.map((p, k) => <Cell key={p.name} fill={PLAT_COLORS[k % PLAT_COLORS.length]} />)}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+          <div style={{ ...display, fontWeight: 800, fontSize: 17 }}>{gbp(total)}</div>
+          <div style={{ ...body, fontSize: 11, color: T.sec }}>Total sales</div>
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 120, display: "flex", flexDirection: "column", gap: 9 }}>
+        {platforms.map((p, k) => (
+          <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 8, ...body, fontSize: 13 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 9, background: PLAT_COLORS[k % PLAT_COLORS.length] }} />
+            <span style={{ flex: 1 }}>{p.name}</span>
+            <span style={{ color: T.sec }}>{total ? Math.round((p.value / total) * 100) : 0}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StockTable({ items, go, openSell }) {
+  const th = { ...body, fontSize: 12, color: T.sec, fontWeight: 500, textAlign: "left", padding: "8px 10px", whiteSpace: "nowrap" };
+  const td = { ...body, fontSize: 13.5, padding: "10px 10px", borderTop: `1px solid ${T.border}`, whiteSpace: "nowrap" };
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>{["Item", "Brand", "Size", "Paid", "Sell price", "Status", "Platform", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {items.map((it) => {
+            const c = calc(it);
+            const age = c.age;
+            return (
+              <tr key={it.id} onClick={() => go({ name: "detail", id: it.id })} style={{ cursor: "pointer" }}>
+                <td style={{ ...td, whiteSpace: "normal" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 180 }}>
+                    <Thumb it={it} size={38} />
+                    <span style={{ fontWeight: 600 }}>{it.name || it.title || "Untitled"}</span>
+                  </div>
+                </td>
+                <td style={{ ...td, color: T.sec }}>{it.brand || "—"}</td>
+                <td style={{ ...td, color: T.sec }}>{it.size || "—"}</td>
+                <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{has(it.purchasePrice) ? gbp(c.tpc) : "—"}</td>
+                <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{c.sold ? gbp(num(it.actualPrice)) : has(it.expectedPrice) ? gbp(num(it.expectedPrice)) : "—"}</td>
+                <td style={td}><StatusPill status={UNSOLD.includes(it.status) && it.status === "Purchased" ? "In stock" : it.status} age={age} /></td>
+                <td style={{ ...td, color: T.sec }}>{it.platform || "—"}</td>
+                <td style={{ ...td, textAlign: "right" }}>
+                  {UNSOLD.includes(it.status) && (
+                    <button onClick={(e) => { e.stopPropagation(); openSell(it.id); }} className="vanim"
+                      style={{ background: T.accentSoft, color: T.accent, border: `1px solid ${T.accentLine}`, borderRadius: 9, padding: "6px 11px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Sold</button>
+                  )}
+                  {c.sold && <span style={{ ...display, fontWeight: 700, color: c.profit >= 0 ? T.pos : T.neg }}>{c.profit >= 0 ? "+" : ""}{gbp(c.profit)}</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RecentSalesTable({ sales, go }) {
+  if (!sales.length) return <div style={{ ...body, fontSize: 13, color: T.dim }}>No sales yet.</div>;
+  const th = { ...body, fontSize: 12, color: T.sec, fontWeight: 500, textAlign: "left", padding: "6px 8px", whiteSpace: "nowrap" };
+  const td = { ...body, fontSize: 13, padding: "9px 8px", borderTop: `1px solid ${T.border}`, whiteSpace: "nowrap" };
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr>{["Date", "Item", "Platform", "Sold for", "Costs", "Profit"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>
+          {sales.map((it) => {
+            const c = calc(it);
+            return (
+              <tr key={it.id} onClick={() => go({ name: "detail", id: it.id })} style={{ cursor: "pointer" }}>
+                <td style={{ ...td, color: T.sec }}>{it.saleDate ? new Date(it.saleDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "—"}</td>
+                <td style={{ ...td, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{it.name || it.title}</td>
+                <td style={{ ...td, color: T.sec }}>{it.platform || "—"}</td>
+                <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{gbp(num(it.actualPrice))}</td>
+                <td style={{ ...td, color: T.neg, fontVariantNumeric: "tabular-nums" }}>{c.tsc ? "-" + gbp(c.tsc) : "—"}</td>
+                <td style={{ ...td, fontWeight: 700, color: c.profit >= 0 ? T.pos : T.neg, fontVariantNumeric: "tabular-nums" }}>{gbp(c.profit)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ============================================================
+   HOME — phone
+   ============================================================ */
+function HomeScreen({ go, items, openAdd, openSell }) {
+  const layout = useLayout();
+  const d = useMemo(() => dashData(items), [items]);
+  if (layout !== "phone") return <HomeWide go={go} items={items} d={d} openAdd={openAdd} openSell={openSell} />;
+
+  const QA = ({ icon: Icon, label, onClick, primary }) => (
+    <button onClick={onClick} className="vanim" style={{ flex: 1, minWidth: 0, background: primary ? T.accentSoft : T.surface, border: `1px solid ${primary ? T.accentLine : T.border}`, borderRadius: 14, padding: "13px 4px", display: "flex", flexDirection: "column", alignItems: "center", gap: 7, color: T.text, cursor: "pointer" }}>
+      {primary
+        ? <span style={{ width: 28, height: 28, borderRadius: 28, background: T.accent, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon size={17} color="#fff" strokeWidth={2.6} /></span>
+        : <Icon size={22} color={T.accent} />}
+      <span style={{ ...body, fontSize: 12, fontWeight: 500 }}>{label}</span>
+    </button>
+  );
+  const H = ({ children, right }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "22px 0 10px" }}>
+      <div style={{ ...display, fontWeight: 700, fontSize: 18 }}>{children}</div>{right}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "calc(16px + env(safe-area-inset-top, 0px)) 18px 28px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <Logo size={27} />
+        <button onClick={() => go({ name: "settings" })} aria-label="Settings" style={{ background: "none", border: "none", color: T.sec, cursor: "pointer", padding: 6 }}>
+          <Settings size={21} />
+        </button>
+      </div>
+
+      <div style={{ background: `linear-gradient(135deg, ${T.raised}, ${T.surface})`, border: `1px solid ${T.border}`, borderRadius: 18, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ ...body, fontSize: 13.5, color: T.sec }}>Total profit (this month)</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 4 }}>
+            <span style={{ ...display, fontSize: 36, fontWeight: 800, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{gbp(d.profitMonth)}</span>
+            <Delta pct={deltaPct(d.profitMonth, d.profitLastMonth)} />
+          </div>
+        </div>
+        <BarChart3 size={38} color={T.accent} strokeWidth={2.6} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 10 }}>
+        {[[Boxes, "Stock value", gbp(d.stockCost)], [Tag, "Items", d.unsold.length], [BarChart3, "Sales (30d)", gbp(d.sales30)]].map(([I, l, v]) => (
+          <div key={l} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, padding: "12px 11px", minWidth: 0 }}>
+            <IconTile icon={I} size={30} />
+            <div style={{ ...body, fontSize: 12, color: T.sec, marginTop: 9 }}>{l}</div>
+            <div style={{ ...display, fontSize: 18, fontWeight: 800, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <H right={<SeeAll onClick={() => go({ name: "stock" })} />}>Recent activity</H>
+      <Panel pad="6px 14px"><ActivityList events={d.events} go={go} limit={4} /></Panel>
+
+      <H>Quick actions</H>
+      <div style={{ display: "flex", gap: 8 }}>
+        <QA icon={Plus} label="Add item" onClick={openAdd} primary />
+        <QA icon={Check} label="New sale" onClick={() => go({ name: "stock" })} />
+        <QA icon={Sparkles} label="Listing" onClick={() => go({ name: "generator" })} />
+        <QA icon={ScanSearch} label="Checker" onClick={() => go({ name: "checker" })} />
+      </div>
+
+      {d.quiet.length > 0 && (
+        <>
+          <H>Sitting too long</H>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {d.quiet.slice(0, 3).map((it) => <ItemRow key={it.id} it={it} onOpen={() => go({ name: "detail", id: it.id })} onSell={openSell} />)}
+          </div>
+        </>
+      )}
+
+      <H right={<RangeTag />}>Top selling items</H>
+      <TopList top={d.top} />
+    </div>
+  );
+}
+
+/* ============================================================
+   HOME — tablet / laptop dashboard
+   ============================================================ */
+function HomeWide({ go, items, d, openAdd, openSell }) {
+  const layout = useLayout();
+  const [cat, setCat] = useState("All");
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const stock = d.unsold.filter((i) => cat === "All" || clean(i.category).toLowerCase() === cat.toLowerCase()).slice(0, 8);
+  const cats = ["All", ...[...new Set(d.unsold.map((i) => i.category).filter(Boolean))].slice(0, 4)];
+  const cols = layout === "desktop";
+
+  return (
+    <div style={{ padding: "28px 28px 40px", maxWidth: 1360, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 22, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ ...display, fontWeight: 800, fontSize: 28, letterSpacing: "-0.02em" }}>{greet}, Mason</div>
+          <div style={{ ...body, fontSize: 14.5, color: T.sec, marginTop: 4 }}>Here's how the reselling's going.</div>
+        </div>
+        <RangeTag />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        <StatTile label="Stock value (cost)" value={gbp(d.stockCost)} icon={Boxes} />
+        <StatTile label="Items in stock" value={d.unsold.length} icon={Tag} sub={d.newThisWeek ? `${d.newThisWeek} new this week` : null} />
+        <StatTile label="Total sales" value={gbp(d.sales30)} icon={BarChart3} delta={<Delta pct={deltaPct(d.sales30, d.salesPrev30)} />} sub="vs previous 30d" />
+        <StatTile label="Profit" value={gbp(d.profit30)} icon={TrendingUp} delta={<Delta pct={deltaPct(d.profit30, d.profitPrev30)} />} sub="vs previous 30d" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: cols ? "1fr 1fr 0.9fr" : "1fr 1fr", gap: 12, marginTop: 12 }}>
+        <Panel title="Sales overview" right={<RangeTag />}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+            <span style={{ ...display, fontSize: 26, fontWeight: 800 }}>{gbp(d.sales30)}</span>
+            <Delta pct={deltaPct(d.sales30, d.salesPrev30)} />
+          </div>
+          <SalesChart daily={d.daily} />
+        </Panel>
+        <Panel title="Profit overview" right={<RangeTag />}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+            <span style={{ ...display, fontSize: 26, fontWeight: 800 }}>{gbp(d.profit30)}</span>
+            <Delta pct={deltaPct(d.profit30, d.profitPrev30)} />
+          </div>
+          <ProfitChart daily={d.daily} />
+        </Panel>
+        <Panel title="Sales by platform" style={cols ? {} : { gridColumn: "1 / -1" }}>
+          <PlatformDonut platforms={d.platforms} total={d.sales30} />
+        </Panel>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: cols ? "2.1fr 0.9fr" : "1fr", gap: 12, marginTop: 12 }}>
+        <Panel title="Current stock" right={
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {cats.length > 1 && cats.map((c) => <Chip key={c} label={c} small active={cat === c} onClick={() => setCat(c)} color={T.accent} />)}
+            <Btn kind="accent" onClick={openAdd} style={{ padding: "8px 13px", fontSize: 13 }}><Plus size={15} /> Add item</Btn>
+          </div>
+        }>
+          {stock.length ? <StockTable items={stock} go={go} openSell={openSell} /> : <div style={{ ...body, fontSize: 13, color: T.dim }}>No unsold stock.</div>}
+          {d.unsold.length > stock.length && <div style={{ marginTop: 10 }}><SeeAll onClick={() => go({ name: "stock" })} /></div>}
+        </Panel>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Panel title="Top selling items" right={<RangeTag />}><TopList top={d.top} /></Panel>
+          <Panel title="Recent activity"><ActivityList events={d.events} go={go} limit={5} /></Panel>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <Panel title="Recent sales" right={<SeeAll onClick={() => go({ name: "stock" })} />}>
+          <RecentSalesTable sales={d.recentSales.slice(0, 6)} go={go} />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   STOCK LIST
+   ============================================================ */
+function StockScreen({ items, go, openAdd, openSell }) {
+  const wide = useLayout() !== "phone";
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState("In stock");
+  const [sort, setSort] = useState("Newest");
 
   const filtered = useMemo(() => {
-    let list = items.filter((i) => (status === "Archived" ? i.status === "Archived" : i.status !== "Archived"));
-    if (status !== "All" && status !== "Archived") list = list.filter((i) => i.status === status);
-    if (brand) list = list.filter((i) => i.brand === brand);
-    if (category) list = list.filter((i) => i.category === category);
+    let list = items;
+    if (tab === "In stock") list = list.filter((i) => UNSOLD.includes(i.status));
+    else if (tab === "Sold") list = list.filter((i) => i.status === "Sold");
+    else list = list.filter((i) => i.status !== "Archived");
     if (q.trim()) {
-      const s = q.trim().toLowerCase();
-      list = list.filter((i) =>
-        [i.name, i.title, i.brand, i.category, i.size, i.colour, i.sku, i.notes, i.storage]
-          .some((f) => clean(f).toLowerCase().includes(s))
-      );
+      const words = q.trim().toLowerCase().split(/\s+/);
+      list = list.filter((i) => {
+        const hay = [i.name, i.title, i.brand, i.size, i.colour, i.sku, i.notes, i.storage, i.platform].map(clean).join(" ").toLowerCase();
+        return words.every((w) => hay.includes(w));
+      });
     }
     const by = {
       Newest: (a, b) => b.createdAt - a.createdAt,
-      Oldest: (a, b) => a.createdAt - b.createdAt,
-      "Price high": (a, b) => num(b.purchasePrice) - num(a.purchasePrice),
-      "Price low": (a, b) => num(a.purchasePrice) - num(b.purchasePrice),
-      "Profit high": (a, b) => (calc(b).profit ?? -1e9) - (calc(a).profit ?? -1e9),
-      "Profit low": (a, b) => (calc(a).profit ?? 1e9) - (calc(b).profit ?? 1e9),
-      "Margin high": (a, b) => (calc(b).margin ?? -1e9) - (calc(a).margin ?? -1e9),
-      "Oldest unsold": (a, b) => (calc(b).age ?? -1) - (calc(a).age ?? -1),
+      Oldest: (a, b) => (calc(b).age ?? -1) - (calc(a).age ?? -1) || a.createdAt - b.createdAt,
+      "Most profit": (a, b) => (calc(b).profit ?? -1e9) - (calc(a).profit ?? -1e9),
+      "Most paid": (a, b) => calc(b).tpc - calc(a).tpc,
       "A–Z": (a, b) => clean(a.name).localeCompare(clean(b.name)),
     };
     return [...list].sort(by[sort] || by.Newest);
-  }, [items, q, status, brand, category, sort]);
+  }, [items, q, tab, sort]);
 
-  const active = items.filter((i) => i.status !== "Archived");
-  const soldItems = active.filter((i) => i.status === "Sold");
-  const revenue = soldItems.reduce((s, i) => s + num(i.actualPrice), 0);
-  const profit = soldItems.reduce((s, i) => s + (calc(i).profit || 0), 0);
-  const spent = active.filter((i) => OWNED.includes(i.status)).reduce((s, i) => s + calc(i).tpc, 0);
-  const unsoldItems = active.filter((i) => UNSOLD.includes(i.status));
-  const invested = unsoldItems.reduce((s, i) => s + calc(i).tpc, 0);
-  const estValue = unsoldItems.reduce((s, i) => s + num(i.expectedPrice), 0);
-  const soldDays = soldItems.map((i) => calc(i).daysToSell).filter((d) => d != null);
-  const avgDays = soldDays.length ? soldDays.reduce((a, b) => a + b, 0) / soldDays.length : null;
+  const counts = {
+    "In stock": items.filter((i) => UNSOLD.includes(i.status)).length,
+    Sold: items.filter((i) => i.status === "Sold").length,
+  };
+  const total = tab === "Sold"
+    ? filtered.reduce((s, i) => s + (calc(i).profit || 0), 0)
+    : filtered.filter((i) => UNSOLD.includes(i.status)).reduce((s, i) => s + calc(i).tpc, 0);
 
   return (
     <>
-      <ScreenHeader title="Stock" onBack={() => go({ name: "home" })}
-        right={<Btn kind="accent" style={{ padding: "8px 14px", fontSize: 13 }} onClick={() => go({ name: "edit", id: null })}><Plus size={15} /> Add</Btn>} />
-      <div style={{ padding: "14px 18px 18px" }}>
-        <button onClick={() => setShowDash(!showDash)} style={{ background: "none", border: "none", color: T.sec, ...body, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 8 }}>
-          {showDash ? "Hide" : "Show"} dashboard
-        </button>
-        {showDash && (
-          <div className="vscroll" style={{ display: "flex", gap: 10, overflowX: "auto", marginBottom: 14, paddingBottom: 2 }}>
-            <StatCard label="Revenue" value={gbp(revenue)} sub={`${soldItems.length} sold`} />
-            <StatCard label="Profit" value={gbp(profit)} color={profit > 0 ? T.pos : profit < 0 ? T.neg : T.text} />
-            <StatCard label="Spent on stock" value={gbp(spent)} />
-            <StatCard label="Invested (unsold)" value={gbp(invested)} sub={`${unsoldItems.length} items`} />
-            <StatCard label="Est. unsold value" value={gbp(estValue)} sub="from expected prices" />
-            <StatCard label="Avg days to sell" value={avgDays == null ? "—" : Math.round(avgDays)} />
+      <ScreenHeader title="Stock"
+        right={<Btn kind="accent" style={{ padding: "9px 14px", fontSize: 13.5 }} onClick={openAdd}><Plus size={16} /> Add</Btn>} />
+      <div style={{ padding: wide ? "20px 28px 32px" : "14px 18px 24px", maxWidth: wide ? 1360 : undefined, margin: "0 auto" }}>
+        <div style={{ display: "flex", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 13, padding: 3, marginBottom: 10 }}>
+          {["In stock", "Sold", "All"].map((t) => (
+            <button key={t} onClick={() => setTab(t)} style={{ flex: 1, background: tab === t ? T.raised : "none", color: tab === t ? T.text : T.sec, border: "none", borderRadius: 10, padding: "9px 6px", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>
+              {t}{counts[t] != null ? ` ${counts[t]}` : ""}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <div style={{ position: "relative", flex: 1 }}>
+            <Search size={16} color={T.sec} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search"
+              style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 13, color: T.text, fontSize: 15, padding: "11px 12px 11px 36px" }} />
           </div>
-        )}
-
-        <div style={{ position: "relative", marginBottom: 10 }}>
-          <Search size={16} color={T.sec} style={{ position: "absolute", left: 12, top: 13 }} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, brand, SKU, notes…"
-            style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 13, color: T.text, fontSize: 14, padding: "12px 12px 12px 36px" }} />
-        </div>
-
-        <div className="vscroll" style={{ display: "flex", gap: 7, overflowX: "auto", marginBottom: 10, paddingBottom: 2 }}>
-          {["All", ...STATUSES].map((s) => (
-            <Chip key={s} label={s} active={status === s} onClick={() => setStatus(s)} color={s !== "All" ? STATUS_COLOR[s] : undefined} small />
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          {[["Brand", brand, setBrand, brands], ["Category", category, setCategory, cats]].map(([lab, val, set, opts]) => (
-            <select key={lab} value={val} onChange={(e) => set(e.target.value)}
-              style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 11, color: val ? T.text : T.sec, fontSize: 12.5, padding: "9px 10px" }}>
-              <option value="">{lab}: all</option>
-              {opts.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-          ))}
           <select value={sort} onChange={(e) => setSort(e.target.value)}
-            style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 11, color: T.text, fontSize: 12.5, padding: "9px 10px" }}>
-            {["Newest","Oldest","Price high","Price low","Profit high","Profit low","Margin high","Oldest unsold","A–Z"].map((o) => <option key={o}>{o}</option>)}
+            style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 13, color: T.text, fontSize: 13, padding: "0 10px" }}>
+            {["Newest", "Oldest", "Most profit", "Most paid", "A–Z"].map((o) => <option key={o}>{o}</option>)}
           </select>
         </div>
 
+        {filtered.length > 0 && (
+          <div style={{ ...body, fontSize: 12.5, color: T.sec, marginBottom: 10 }}>
+            {filtered.length} item{filtered.length === 1 ? "" : "s"} · {tab === "Sold" ? `${gbp(total)} profit` : `${gbp(total)} cost`}
+          </div>
+        )}
+
         {filtered.length === 0 ? (
           items.length === 0 ? (
-            <Empty icon={Boxes} title="No stock yet" desc="Add your first item and Resell HQ will start tracking costs, profit and selling speed."
-              action={<Btn kind="accent" onClick={() => go({ name: "edit", id: null })}><Plus size={16} /> Add first item</Btn>} />
+            <Empty icon={Boxes} title="No stock yet" desc="Add your first item — name and price is all it needs."
+              action={<Btn kind="accent" onClick={openAdd}><Plus size={16} /> Add stock</Btn>} />
           ) : (
-            <Empty icon={Search} title="Nothing matches" desc="No items match the current search and filters." />
+            <Empty icon={Search} title="Nothing here" desc={q ? "Nothing matches that search." : tab === "Sold" ? "No sales yet." : "No unsold stock."} />
           )
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {filtered.map((it) => {
-              const c = calc(it);
-              return (
-                <Card key={it.id} onClick={() => go({ name: "detail", id: it.id })} style={{ display: "flex", gap: 12, alignItems: "center", padding: 12 }}>
-                  <div style={{ width: 52, height: 52, borderRadius: 12, background: T.raised, flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {it.thumb ? <img src={it.thumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Tag size={18} color={T.sec} />}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ ...body, fontWeight: 600, fontSize: 14.5, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {it.name || it.title || "Untitled item"}
-                    </div>
-                    <div style={{ ...body, fontSize: 12, color: T.sec, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {[it.brand, it.size, it.category].filter(Boolean).join(" · ") || "No details"}
-                    </div>
-                    <div style={{ marginTop: 5, display: "flex", gap: 6, alignItems: "center" }}>
-                      <StatusPill status={it.status} age={c.age} />
-                      {c.age != null && c.age > 30 && c.age <= STALE_DAYS && (
-                        <span style={{ ...body, fontSize: 10.5, color: T.sec }}>{c.age}d in stock</span>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    {c.sold ? (
-                      <>
-                        <div style={{ ...display, fontWeight: 700, fontSize: 15, color: c.profit >= 0 ? T.pos : T.neg, fontVariantNumeric: "tabular-nums" }}>{gbp(c.profit)}</div>
-                        <div style={{ ...body, fontSize: 11, color: T.sec }}>profit</div>
-                      </>
-                    ) : (
-                      <>
-                        <div style={{ ...display, fontWeight: 700, fontSize: 15, color: T.text, fontVariantNumeric: "tabular-nums" }}>{has(it.purchasePrice) ? gbp(c.tpc) : "—"}</div>
-                        <div style={{ ...body, fontSize: 11, color: T.sec }}>cost</div>
-                      </>
-                    )}
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
+          wide ? (
+            <Panel pad="8px 12px"><StockTable items={filtered} go={go} openSell={openSell} /></Panel>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {filtered.map((it) => <ItemRow key={it.id} it={it} onOpen={() => go({ name: "detail", id: it.id })} onSell={openSell} />)}
+            </div>
+          )
         )}
       </div>
     </>
@@ -823,15 +1349,12 @@ function StockScreen({ items, go }) {
 /* ============================================================
    ITEM DETAIL
    ============================================================ */
-function DetailScreen({ items, go, updateItem, deleteItem, duplicateItem, toast }) {
+function DetailScreen({ items, go, updateItem, deleteItem, duplicateItem, toast, openSell }) {
   const it = items.find((i) => i.id === (go.params && go.params.id));
-  return <DetailInner key={it ? it.id : "none"} it={it} go={go.go} updateItem={updateItem} deleteItem={deleteItem} duplicateItem={duplicateItem} toast={toast} />;
+  return <DetailInner key={it ? it.id : "none"} it={it} items={items} go={go.go} updateItem={updateItem} deleteItem={deleteItem} duplicateItem={duplicateItem} toast={toast} openSell={openSell} />;
 }
-function DetailInner({ it, go, updateItem, deleteItem, duplicateItem, toast }) {
+function DetailInner({ it, items, go, updateItem, deleteItem, duplicateItem, toast, openSell }) {
   const [photos, setPhotos] = useState([]);
-  const [soldPanel, setSoldPanel] = useState(false);
-  const [soldPrice, setSoldPrice] = useState("");
-  const [soldDate, setSoldDate] = useState(todayISO());
   const [confirmDel, setConfirmDel] = useState(false);
 
   useEffect(() => {
@@ -851,13 +1374,6 @@ function DetailInner({ it, go, updateItem, deleteItem, duplicateItem, toast }) {
     ["Purchased", it.purchaseDate ? fmtDate(it.purchaseDate) : ""], ["Listed", it.listingDate ? fmtDate(it.listingDate) : ""],
     ["Sold", it.saleDate ? fmtDate(it.saleDate) : ""], ["Tags", it.tags],
   ].filter(([, v]) => clean(v).trim() !== "");
-
-  const markSold = () => {
-    if (!has(soldPrice)) { toast("Enter the sale price first", true); return; }
-    updateItem({ ...it, status: "Sold", actualPrice: soldPrice, saleDate: soldDate, updatedAt: Date.now() });
-    setSoldPanel(false);
-    toast("Marked as sold");
-  };
 
   return (
     <>
@@ -922,23 +1438,17 @@ function DetailInner({ it, go, updateItem, deleteItem, duplicateItem, toast }) {
           )}
         </Card>
 
+        {UNSOLD.includes(it.status) && (
+          <Btn kind="accent" style={{ width: "100%", marginBottom: 12, fontSize: 15.5, padding: "15px" }} onClick={() => openSell(it.id)}>
+            <Check size={17} /> Sold it
+          </Btn>
+        )}
+
         {it.status !== "Sold" && (
-          <div style={{ marginBottom: 12 }}>
-            {!soldPanel ? (
-              <Btn kind="accent" style={{ width: "100%" }} onClick={() => { setSoldPrice(clean(it.actualPrice) || clean(it.expectedPrice)); setSoldPanel(true); }}>
-                <Check size={16} /> Mark as sold
-              </Btn>
-            ) : (
-              <Card>
-                <Fi label="Sold for" value={soldPrice} onChange={setSoldPrice} money placeholder="0.00" />
-                <Fi label="Sale date" value={soldDate} onChange={setSoldDate} type="date" />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Btn kind="accent" style={{ flex: 1 }} onClick={markSold}>Confirm sale</Btn>
-                  <Btn kind="ghost" onClick={() => setSoldPanel(false)}>Cancel</Btn>
-                </div>
-              </Card>
-            )}
-          </div>
+          <Card style={{ marginBottom: 12 }}>
+            <div style={{ ...body, fontSize: 12, color: T.sec, fontWeight: 600, letterSpacing: "0.02em", marginBottom: 10 }}>WHAT'S IT WORTH</div>
+            <PriceCheck items={items} it={it} />
+          </Card>
         )}
 
         {(it.title || it.description) && (
@@ -954,7 +1464,7 @@ function DetailInner({ it, go, updateItem, deleteItem, duplicateItem, toast }) {
 
         {it.estSnapshot && (
           <Banner icon={ScanSearch}>
-            From Opportunity Checker: rated <b style={{ color: RATING_COLOR[it.estSnapshot.rating] }}>{it.estSnapshot.rating}</b>, estimated resale {gbp(it.estSnapshot.priceLikely)} / profit {gbp(it.estSnapshot.profitLikely)} ({it.estSnapshot.confidence} confidence). Estimates, not guarantees.
+            Old AI guess from the Buy checker: ~{gbp(it.estSnapshot.priceLikely)} resale. Rough only — eBay sold prices above are the real numbers.
           </Banner>
         )}
 
@@ -1226,7 +1736,7 @@ Respond with ONLY a JSON object:
 
   return (
     <>
-      <ScreenHeader title="Listing Generator" onBack={() => go({ name: "home" })} />
+      <ScreenHeader title="Listing writer" onBack={() => go({ name: "home" })} />
       <div style={{ padding: "16px 18px 24px" }}>
         {busy ? <Spinner label={busy} /> : (
           <>
@@ -1462,7 +1972,7 @@ Respond with ONLY a JSON object (numbers in GBP, no currency symbols):
 
   return (
     <>
-      <ScreenHeader title="Opportunity Checker" onBack={() => go({ name: "home" })} />
+      <ScreenHeader title="Buy checker" onBack={() => go({ name: "home" })} />
       <div style={{ padding: "16px 18px 24px" }}>
         {busy ? <Spinner label={busy} /> : (
           <>
@@ -1909,8 +2419,8 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
           if (Array.isArray(p)) images[it.id] = p;
         }
       }
-      const backup = { app: "vault", version: 1, exportedAt: new Date().toISOString(), items, checks, images };
-      downloadFile(`vault-backup-${todayISO()}.json`, JSON.stringify(backup), "application/json");
+      const backup = { app: "resell-hq", version: 1, exportedAt: new Date().toISOString(), items, checks, images };
+      downloadFile(`resell-hq-backup-${todayISO()}.json`, JSON.stringify(backup), "application/json");
       toast("Backup downloaded");
     } catch (e) { toast("Export failed: " + e.message, true); }
     finally { setBusy(false); }
@@ -1924,7 +2434,7 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      if (data.app !== "vault" || !Array.isArray(data.items)) throw new Error("That doesn't look like a Resell HQ backup file.");
+      if (!["resell-hq", "vault"].includes(data.app) || !Array.isArray(data.items)) throw new Error("That doesn't look like a Resell HQ backup file.");
       const result = await importData(data);
       toast(`Restored ${result.added} item${result.added === 1 ? "" : "s"}${result.skipped ? `, skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : ""}`);
     } catch (err2) { toast("Import failed: " + err2.message, true); }
@@ -1941,10 +2451,10 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
             {items.length} item{items.length === 1 ? "" : "s"} and {checks.length} opportunity check{checks.length === 1 ? "" : "s"} stored in this browser on this device. Export a backup regularly — clearing browser data will erase it.
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Btn kind="ghost" disabled={busy || items.length === 0} onClick={() => { downloadFile(`vault-inventory-${todayISO()}.csv`, toCsv(items), "text/csv"); toast("CSV downloaded"); }}>
+            <Btn kind="ghost" disabled={busy || items.length === 0} onClick={() => { downloadFile(`resell-hq-inventory-${todayISO()}.csv`, toCsv(items), "text/csv"); toast("CSV downloaded"); }}>
               <Download size={15} /> Export inventory CSV
             </Btn>
-            <Btn kind="ghost" disabled={busy || items.length === 0} onClick={() => { downloadFile(`vault-sales-${todayISO()}.csv`, toCsv(items.filter((i) => i.status === "Sold")), "text/csv"); toast("Sales CSV downloaded"); }}>
+            <Btn kind="ghost" disabled={busy || items.length === 0} onClick={() => { downloadFile(`resell-hq-sales-${todayISO()}.csv`, toCsv(items.filter((i) => i.status === "Sold")), "text/csv"); toast("Sales CSV downloaded"); }}>
               <Download size={15} /> Export sales CSV
             </Btn>
             <Btn kind="ghost" disabled={busy} onClick={exportBackup}>
@@ -1959,7 +2469,7 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
 
         <SectionBox title="AI access" defaultOpen={false}>
           <div style={{ fontSize: 13, color: T.sec, lineHeight: 1.5, marginBottom: 10 }}>
-            The Listing Generator and Opportunity Checker need this passphrase. It must match VAULT_PASSPHRASE
+            The Listing Generator and Opportunity Checker need this passphrase. It must match RESELL_HQ_PASSPHRASE
             in Vercel (Settings then Environment Variables). It stops other people using the AI on your account.
           </div>
           <Fi
@@ -2034,30 +2544,30 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
 /* ============================================================
    SHELL, NAV, FRAME
    ============================================================ */
-function BottomNav({ screen, go }) {
+function BottomNav({ screen, go, openAdd }) {
   const items = [
     { id: "home", label: "Home", icon: Home },
     { id: "stock", label: "Stock", icon: Package },
     { id: "add", label: "", icon: Plus, raised: true },
-    { id: "checker", label: "Checker", icon: ScanSearch },
-    { id: "analytics", label: "Stats", icon: BarChart3 },
+    { id: "analytics", label: "Analytics", icon: BarChart3 },
+    { id: "settings", label: "More", icon: Settings },
   ];
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around", borderTop: `1px solid ${T.border}`, background: "rgba(1,2,7,0.94)", backdropFilter: "blur(12px)", padding: "8px 6px calc(8px + env(safe-area-inset-bottom, 0px))", flexShrink: 0 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around", borderTop: `1px solid ${T.border}`, background: "rgba(11,11,12,0.94)", backdropFilter: "blur(12px)", padding: "8px 6px calc(8px + env(safe-area-inset-bottom, 0px))", flexShrink: 0 }}>
       {items.map((it) => {
         const Icon = it.icon;
         const activeN = screen === it.id || (it.id === "stock" && ["detail", "edit"].includes(screen));
         if (it.raised) {
           return (
-            <button key={it.id} onClick={() => go({ name: "edit", id: null })} aria-label="Add item" className="vanim"
-              style={{ width: 48, height: 48, borderRadius: 16, background: T.accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -18, boxShadow: "0 6px 18px rgba(74,200,255,0.35)" }}>
-              <Icon size={24} color="#141210" strokeWidth={2.5} />
+            <button key={it.id} onClick={openAdd} aria-label="Add stock" className="vanim"
+              style={{ width: 52, height: 52, borderRadius: 18, background: T.accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -20, boxShadow: "0 6px 20px rgba(239,59,69,0.35)" }}>
+              <Icon size={25} color={T.accentInk} strokeWidth={2.6} />
             </button>
           );
         }
         return (
           <button key={it.id} onClick={() => go({ name: it.id })} className="vanim"
-            style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "4px 10px", cursor: "pointer", color: activeN ? T.text : T.sec }}>
+            style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "4px 10px", cursor: "pointer", color: activeN ? T.accent : T.sec }}>
             <Icon size={21} strokeWidth={activeN ? 2.4 : 2} />
             <span style={{ ...body, fontSize: 10.5, fontWeight: activeN ? 600 : 500 }}>{it.label}</span>
           </button>
@@ -2097,12 +2607,18 @@ function Toast({ msg }) {
 }
 
 function AppShell({ isDesktop }) {
+  const layout = useViewportMode();
+  const wide = layout !== "phone";
   const [screen, setScreen] = useState({ name: "home" });
   const [items, setItems] = useState([]);
   const [checks, setChecks] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
+  const [sheet, setSheet] = useState(null);
+  const [editPrefill, setEditPrefill] = useState(null);
   const toastTimer = useRef(null);
+  const openAdd = () => setSheet({ type: "add" });
+  const openSell = (id) => setSheet({ type: "sell", id });
 
   const toast = (text, bad = false) => {
     setToastMsg({ text, bad });
@@ -2172,37 +2688,48 @@ function AppShell({ isDesktop }) {
     setItems([]); setChecks([]);
   };
 
-  const go = (s) => setScreen(s);
+  const go = (s) => { if (!(s.name === "edit" && !s.id)) setEditPrefill(null); setScreen(s); };
   const goObj = { go, params: screen };
 
-  /* The constellation is Home's own navigation, so BottomNav is hidden
-     there — and only there. onHome tracks the fallback branch too. */
   let content;
-  let onHome = false;
-  if (!loaded) { content = <Spinner label="Loading your stock…" />; onHome = screen.name === "home"; }
-  else if (screen.name === "home") { content = <HomeScreen go={go} items={items} />; onHome = true; }
-  else if (screen.name === "stock") content = <StockScreen items={items} go={go} />;
-  else if (screen.name === "detail") content = <DetailScreen items={items} go={goObj} updateItem={updateItem} deleteItem={deleteItem} duplicateItem={duplicateItem} toast={toast} />;
-  else if (screen.name === "edit" || screen.name === "add") content = <EditScreen items={items} go={goObj} saveItem={saveItem} toast={toast} />;
+  if (!loaded) content = <Spinner label="Loading your stock…" />;
+  else if (screen.name === "stock") content = <StockScreen items={items} go={go} openAdd={openAdd} openSell={openSell} />;
+  else if (screen.name === "detail") content = <DetailScreen items={items} go={goObj} updateItem={updateItem} deleteItem={deleteItem} duplicateItem={duplicateItem} toast={toast} openSell={openSell} />;
+  else if (screen.name === "edit" || screen.name === "add") content = <EditScreen items={items} go={goObj} saveItem={saveItem} toast={toast} prefill={editPrefill} />;
   else if (screen.name === "generator") content = <GeneratorScreen go={go} saveItem={saveItem} toast={toast} />;
   else if (screen.name === "checker") content = <CheckerScreen go={go} saveItem={saveItem} saveCheck={saveCheck} toast={toast} />;
   else if (screen.name === "analytics") content = <AnalyticsScreen items={items} checks={checks} go={go} />;
   else if (screen.name === "settings") content = <SettingsScreen items={items} checks={checks} go={go} importData={importData} wipeAll={wipeAll} toast={toast} />;
-  else { content = <HomeScreen go={go} items={items} />; onHome = true; }
+  else content = <HomeScreen go={go} items={items} openAdd={openAdd} openSell={openSell} />;
+
+  const sellItem = sheet && sheet.type === "sell" ? items.find((i) => i.id === sheet.id) : null;
+
+  const fullWidth = ["home", "stock"].includes(screen.name) || !loaded;
+  const main = (
+    <div key={screen.name + (screen.id || "")} className="vscroll vfade" style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", minWidth: 0 }}>
+      {wide && !fullWidth ? <div style={{ maxWidth: 760, margin: "0 auto" }}>{content}</div> : content}
+    </div>
+  );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: T.bg, color: T.text, overflow: "hidden", position: "relative" }}>
-      {isDesktop && <StatusBar />}
-      <div className="vscroll" style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain" }}>
-        {content}
+    <LayoutCtx.Provider value={layout}>
+      <div style={{ display: "flex", flexDirection: wide ? "row" : "column", height: "100%", background: T.bg, color: T.text, overflow: "hidden", position: "relative" }}>
+        {isDesktop && !wide && <StatusBar />}
+        {wide && <Sidebar screen={screen.name} go={go} openAdd={openAdd} compact={layout === "tablet"} />}
+        {main}
+        <Toast msg={toastMsg} />
+        {!wide && <BottomNav screen={screen.name} go={go} openAdd={openAdd} />}
+        {sheet && sheet.type === "add" && (
+          <QuickAddSheet items={items} onClose={() => setSheet(null)} saveItem={saveItem} toast={toast}
+            openFull={(prefill) => { setSheet(null); setEditPrefill(prefill); setScreen({ name: "edit", id: null }); }} />
+        )}
+        {sellItem && <SellSheet it={sellItem} onClose={() => setSheet(null)} updateItem={updateItem} toast={toast} />}
       </div>
-      <Toast msg={toastMsg} />
-      {!onHome && <BottomNav screen={screen.name} go={go} />}
-    </div>
+    </LayoutCtx.Provider>
   );
 }
 
-export default function VaultApp() {
+export default function ResellHQApp() {
   return (
     <div style={{
       ...body, height: "100dvh", background: T.bg,

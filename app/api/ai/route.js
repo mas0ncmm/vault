@@ -12,9 +12,9 @@ export async function POST(req) {
     );
   }
 
-  const wanted = process.env.VAULT_PASSPHRASE;
+  const wanted = process.env.RESELL_HQ_PASSPHRASE || process.env.VAULT_PASSPHRASE;
   if (wanted) {
-    const given = req.headers.get("x-vault-pass") || "";
+    const given = req.headers.get("x-resellhq-pass") || "";
     if (given !== wanted) {
       return Response.json(
         { error: { type: "authentication_error", message: "PASSPHRASE: wrong or missing app passphrase." } },

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Vault is a personal Vinted/reselling tracker app: a Next.js 14 (App Router) PWA with four features —
+Resell HQ is a personal Vinted/reselling tracker app: a Next.js 14 (App Router) PWA with four features —
 a stock tracker with profit/margin/ROI math, an AI listing generator, an AI "should I buy this to
 resell" opportunity checker, and analytics. There is no backend database: all inventory data lives in
 the browser's IndexedDB. The only server-side code is a single API route that proxies calls to the
@@ -30,7 +30,7 @@ state library, no CSS framework, and no component files outside this one. Before
   money/date/JSON-extraction helpers (`gbp`, `pct`, `extractJson`, etc.). Reuse these instead of
   inlining new styles or formatting logic.
 - **Storage layer** — a thin IndexedDB wrapper (`sGet`/`sSet`/`sDel` over a single `vault-db` object
-  store) used as a generic key-value store. Items live under key `vault-items`, opportunity checks
+  store) used as a generic key-value store. Keys keep their old `vault-` prefix on purpose — renaming them would orphan existing users' saved data. Items live under key `vault-items`, opportunity checks
   under `vault-checks`, and each item's photos are stored separately under `vault-imgs-<id>` (data
   URLs) so the main item list stays small. When adding a new persisted field, wire it through
   `blankItem()`, the relevant screen's form, and — if it should survive backup/restore — the
@@ -48,7 +48,7 @@ state library, no CSS framework, and no component files outside this one. Before
 - **Shell/routing** — `AppShell` holds all app state (`items`, `checks`, current `screen`) and passes
   it down as props; `go({ name: "detail", id })`-style objects are the only "routing" — there is no
   Next.js file-based routing beyond the single `/` page. `BottomNav` and `go()` are how screens
-  navigate. `VaultApp` (default export) wraps `AppShell` for the PWA viewport.
+  navigate. `ResellHQApp` (default export) wraps `AppShell` for the PWA viewport.
 
 **AI integration** (`GeneratorScreen`, `CheckerScreen`, and the `askClaude`/`aiCallOnce` helpers in
 `page.tsx`): the client builds a prompt (with `GEN_HONESTY` rules baked in to prevent the model from
@@ -60,8 +60,8 @@ AI is asked to return, update both the prompt string and the parsing/validation 
 they're adjacent but not type-checked against each other.
 
 `app/api/ai/route.js` is a stateless proxy to `https://api.anthropic.com/v1/messages`: it validates the
-model against `ALLOWED_MODELS`, optionally gates on an `x-vault-pass` header matched against
-`VAULT_PASSPHRASE`, caps `max_tokens` at 4000, and forwards `ANTHROPIC_API_KEY` server-side only. Keep
+model against `ALLOWED_MODELS`, optionally gates on an `x-resellhq-pass` header matched against
+`RESELL_HQ_PASSPHRASE` (legacy `VAULT_PASSPHRASE` still accepted), caps `max_tokens` at 4000, and forwards `ANTHROPIC_API_KEY` server-side only. Keep
 `ALLOWED_MODELS` here in sync with `AI_MODELS` in `page.tsx`.
 
 ## Conventions
@@ -77,4 +77,4 @@ model against `ALLOWED_MODELS`, optionally gates on an `x-vault-pass` header mat
   from the photos (`GEN_HONESTY` constant) — preserve this constraint if you touch the generator
   prompts.
 - Required server env vars: `ANTHROPIC_API_KEY` (required for any AI feature to work) and
-  `VAULT_PASSPHRASE` (optional; gates AI usage behind a passphrase set in the Settings screen).
+  `RESELL_HQ_PASSPHRASE` (legacy `VAULT_PASSPHRASE` still accepted) (optional; gates AI usage behind a passphrase set in the Settings screen).
