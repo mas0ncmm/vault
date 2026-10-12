@@ -15,7 +15,7 @@ import {
 } from "./theme";
 
 /* ============================================================
-   VAULT — personal Vinted reselling app (full build)
+   RESELL HQ — personal Vinted reselling app (full build)
    Stock tracker · Dashboard · AI listing generator ·
    AI opportunity checker · Analytics · Backup & CSV
    ============================================================ */
@@ -79,7 +79,7 @@ async function aiCallOnce(model, content, useSearch) {
   if (useSearch) bodyObj.tools = [{ type: "web_search_20250305", name: "web_search" }];
   const res = await fetch("/api/ai", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-vault-pass": await getPass() },
+    headers: { "Content-Type": "application/json", "x-resellhq-pass": await getPass() },
     body: JSON.stringify(bodyObj),
   });
   let data = null;
@@ -186,6 +186,7 @@ function downloadFile(name, content, type) {
 
 /* ---------- storage ---------- */
 const storageOK = typeof indexedDB !== "undefined";
+/* Storage keys still say "vault" on purpose: renaming them would orphan stock already saved on your phone. */
 const DB_NAME = "vault-db", DB_STORE = "kv";
 let dbPromise = null;
 function openDb() {
@@ -571,9 +572,9 @@ function QuickAddSheet({ items, onClose, saveItem, toast, openFull }) {
       )}
 
       <div style={miniLabel}>WHAT IS IT</div>
-      <input ref={nameRef} list="vault-names" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Nike Dunk Low Panda"
+      <input ref={nameRef} list="resellhq-names" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Nike Dunk Low Panda"
         onKeyDown={(e) => { if (e.key === "Enter") add(false); }} style={{ ...bigInput, marginBottom: 14 }} />
-      <datalist id="vault-names">{pastNames.map((n) => <option key={n} value={n} />)}</datalist>
+      <datalist id="resellhq-names">{pastNames.map((n) => <option key={n} value={n} />)}</datalist>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
         <div>
@@ -770,7 +771,7 @@ function HomeScreen({ go, items, openAdd, openSell }) {
   return (
     <div style={{ padding: "calc(18px + env(safe-area-inset-top, 0px)) 18px 28px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <div style={{ ...display, fontWeight: 800, fontSize: 26, letterSpacing: "-0.02em" }}>Vault</div>
+        <div style={{ ...display, fontWeight: 800, fontSize: 26, letterSpacing: "-0.02em" }}>Resell HQ</div>
         <button onClick={() => go({ name: "settings" })} aria-label="Settings" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", color: T.sec, cursor: "pointer" }}>
           <Settings size={17} />
         </button>
@@ -1977,8 +1978,8 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
           if (Array.isArray(p)) images[it.id] = p;
         }
       }
-      const backup = { app: "vault", version: 1, exportedAt: new Date().toISOString(), items, checks, images };
-      downloadFile(`vault-backup-${todayISO()}.json`, JSON.stringify(backup), "application/json");
+      const backup = { app: "resell-hq", version: 1, exportedAt: new Date().toISOString(), items, checks, images };
+      downloadFile(`resell-hq-backup-${todayISO()}.json`, JSON.stringify(backup), "application/json");
       toast("Backup downloaded");
     } catch (e) { toast("Export failed: " + e.message, true); }
     finally { setBusy(false); }
@@ -1992,7 +1993,7 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      if (data.app !== "vault" || !Array.isArray(data.items)) throw new Error("That doesn't look like a Resell HQ backup file.");
+      if (!["resell-hq", "vault"].includes(data.app) || !Array.isArray(data.items)) throw new Error("That doesn't look like a Resell HQ backup file.");
       const result = await importData(data);
       toast(`Restored ${result.added} item${result.added === 1 ? "" : "s"}${result.skipped ? `, skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : ""}`);
     } catch (err2) { toast("Import failed: " + err2.message, true); }
@@ -2009,10 +2010,10 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
             {items.length} item{items.length === 1 ? "" : "s"} and {checks.length} opportunity check{checks.length === 1 ? "" : "s"} stored in this browser on this device. Export a backup regularly — clearing browser data will erase it.
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Btn kind="ghost" disabled={busy || items.length === 0} onClick={() => { downloadFile(`vault-inventory-${todayISO()}.csv`, toCsv(items), "text/csv"); toast("CSV downloaded"); }}>
+            <Btn kind="ghost" disabled={busy || items.length === 0} onClick={() => { downloadFile(`resell-hq-inventory-${todayISO()}.csv`, toCsv(items), "text/csv"); toast("CSV downloaded"); }}>
               <Download size={15} /> Export inventory CSV
             </Btn>
-            <Btn kind="ghost" disabled={busy || items.length === 0} onClick={() => { downloadFile(`vault-sales-${todayISO()}.csv`, toCsv(items.filter((i) => i.status === "Sold")), "text/csv"); toast("Sales CSV downloaded"); }}>
+            <Btn kind="ghost" disabled={busy || items.length === 0} onClick={() => { downloadFile(`resell-hq-sales-${todayISO()}.csv`, toCsv(items.filter((i) => i.status === "Sold")), "text/csv"); toast("Sales CSV downloaded"); }}>
               <Download size={15} /> Export sales CSV
             </Btn>
             <Btn kind="ghost" disabled={busy} onClick={exportBackup}>
@@ -2027,7 +2028,7 @@ function SettingsScreen({ items, checks, go, importData, wipeAll, toast }) {
 
         <SectionBox title="AI access" defaultOpen={false}>
           <div style={{ fontSize: 13, color: T.sec, lineHeight: 1.5, marginBottom: 10 }}>
-            The Listing Generator and Opportunity Checker need this passphrase. It must match VAULT_PASSPHRASE
+            The Listing Generator and Opportunity Checker need this passphrase. It must match RESELL_HQ_PASSPHRASE
             in Vercel (Settings then Environment Variables). It stops other people using the AI on your account.
           </div>
           <Fi
@@ -2277,7 +2278,7 @@ function AppShell({ isDesktop }) {
   );
 }
 
-export default function VaultApp() {
+export default function ResellHQApp() {
   return (
     <div style={{
       ...body, height: "100dvh", background: T.bg,

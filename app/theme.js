@@ -1,5 +1,5 @@
 /* ============================================================
-   VAULT — design tokens (clean)
+   RESELL HQ — design tokens (clean)
    Colours, type, global styles, and the shared status/rating
    colour maps. Everything visual that page.tsx used to define
    inline now lives here so the palette can be swapped in one
