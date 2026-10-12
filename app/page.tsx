@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
+  AreaChart, Area, PieChart, Pie, Cell,
 } from "recharts";
 import {
   T, display, body, mono, globalCss,
@@ -273,7 +274,7 @@ function Chip({ label, color, active, onClick, small }) {
   return (
     <button onClick={onClick} style={{
       background: active ? (color || T.text) : T.surface,
-      color: active ? T.bg : (color || T.sec),
+      color: active ? (color === T.accent ? T.accentInk : T.bg) : (color || T.sec),
       border: `1px solid ${active ? "transparent" : T.border}`,
       borderRadius: 999, padding: small ? "5px 10px" : "7px 13px",
       fontSize: small ? 11.5 : 12.5, fontWeight: 600, cursor: onClick ? "pointer" : "default",
@@ -493,15 +494,16 @@ function PriceCheck({ items, it, compact }) {
    not a full form.
    ============================================================ */
 function Sheet({ title, onClose, children }) {
+  const wide = useLayout() !== "phone";
   useEffect(() => {
     const k = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, []);
   return (
-    <div className="vfade" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 40, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div className="vsheet" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, maxHeight: "92%", overflowY: "auto", background: T.surface, borderTop: `1px solid ${T.border}`, borderRadius: "22px 22px 0 0", padding: "10px 18px calc(18px + env(safe-area-inset-bottom, 0px))" }}>
-        <div style={{ width: 38, height: 4, borderRadius: 4, background: T.border, margin: "0 auto 14px" }} />
+    <div className="vfade" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 40, display: "flex", alignItems: wide ? "center" : "flex-end", justifyContent: "center", padding: wide ? 24 : 0 }}>
+      <div className={wide ? "vfade" : "vsheet"} onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 520, maxHeight: "92%", overflowY: "auto", background: T.surface, border: wide ? `1px solid ${T.border}` : "none", borderTop: `1px solid ${T.border}`, borderRadius: wide ? 22 : "22px 22px 0 0", padding: wide ? "22px 24px 24px" : "10px 18px calc(18px + env(safe-area-inset-bottom, 0px))", boxShadow: wide ? "0 24px 60px rgba(0,0,0,0.5)" : "none" }}>
+        {!wide && <div style={{ width: 38, height: 4, borderRadius: 4, background: T.border, margin: "0 auto 14px" }} />}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ ...display, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em" }}>{title}</div>
           <button onClick={onClose} aria-label="Close" style={{ background: T.raised, border: "none", borderRadius: 10, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", color: T.sec, cursor: "pointer" }}>
@@ -722,7 +724,7 @@ function ItemRow({ it, onOpen, onSell }) {
       </div>
       {onSell && UNSOLD.includes(it.status) && (
         <button onClick={(e) => { e.stopPropagation(); onSell(it.id); }} className="vanim"
-          style={{ background: T.accentSoft, color: T.accent, border: `1px solid rgba(212,255,58,0.25)`, borderRadius: 10, padding: "8px 11px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
+          style={{ background: T.accentSoft, color: T.accent, border: `1px solid ${T.accentLine}`, borderRadius: 10, padding: "8px 11px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
           Sold
         </button>
       )}
@@ -731,89 +733,523 @@ function ItemRow({ it, onOpen, onSell }) {
 }
 
 /* ============================================================
-   HOME
+   LAYOUT — phone / tablet / laptop
+   Under 768px: phone layout with bottom nav. 768–1099px: icon
+   rail sidebar. 1100px+: full sidebar and dashboard grid.
    ============================================================ */
-function HomeScreen({ go, items, openAdd, openSell }) {
+const LayoutCtx = React.createContext("phone");
+const useLayout = () => React.useContext(LayoutCtx);
+function useViewportMode() {
+  const [mode, setMode] = useState("phone");
+  useEffect(() => {
+    const f = () => { const w = window.innerWidth; setMode(w >= 1100 ? "desktop" : w >= 768 ? "tablet" : "phone"); };
+    f();
+    window.addEventListener("resize", f);
+    return () => window.removeEventListener("resize", f);
+  }, []);
+  return mode;
+}
+
+function Logo({ size = 26 }) {
+  return (
+    <span style={{ ...display, fontWeight: 800, fontSize: size, letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>
+      Resell <span style={{ color: T.accent }}>HQ</span>
+    </span>
+  );
+}
+
+const NAV = [
+  { id: "home", label: "Dashboard", icon: Home },
+  { id: "stock", label: "Stock", icon: Package },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "generator", label: "Listing writer", icon: Sparkles },
+  { id: "checker", label: "Buy checker", icon: ScanSearch },
+];
+function Sidebar({ screen, go, openAdd, compact }) {
+  const isActive = (id) => screen === id || (id === "stock" && ["detail", "edit"].includes(screen));
+  const NavBtn = ({ n }) => {
+    const Icon = n.icon;
+    const on = isActive(n.id);
+    return (
+      <button onClick={() => go({ name: n.id })} title={n.label} className="vanim" style={{
+        display: "flex", alignItems: "center", justifyContent: compact ? "center" : "flex-start", gap: 12, width: "100%",
+        background: on ? T.accentSoft : "none", color: on ? T.accent : T.sec, border: "none",
+        borderLeft: `3px solid ${on ? T.accent : "transparent"}`, borderRadius: 10,
+        padding: compact ? "12px 0" : "11px 14px", fontSize: 14.5, fontWeight: on ? 600 : 500, cursor: "pointer",
+      }}>
+        <Icon size={19} strokeWidth={on ? 2.4 : 2} />{!compact && n.label}
+      </button>
+    );
+  };
+  return (
+    <div style={{ width: compact ? 76 : 236, flexShrink: 0, background: T.surface, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", padding: compact ? "22px 10px" : "26px 16px", gap: 4 }}>
+      <div style={{ padding: compact ? "0 0 22px" : "0 8px 26px", textAlign: compact ? "center" : "left" }}>
+        {compact ? <span style={{ ...display, fontWeight: 800, fontSize: 20, color: T.accent }}>HQ</span> : <Logo size={28} />}
+      </div>
+      {NAV.map((n) => <NavBtn key={n.id} n={n} />)}
+      <Btn kind="accent" onClick={openAdd} style={{ marginTop: 16, width: "100%", padding: compact ? "12px 0" : "12px 14px" }}>
+        <Plus size={18} />{!compact && "Add item"}
+      </Btn>
+      <div style={{ flex: 1 }} />
+      <NavBtn n={{ id: "settings", label: "Settings", icon: Settings }} />
+    </div>
+  );
+}
+
+/* ---------- dashboard numbers ---------- */
+const DAY = 86400000;
+function ago(ts) {
+  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (m < 60) return m <= 1 ? "just now" : `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  return d < 30 ? `${d}d ago` : fmtDate(new Date(ts));
+}
+const saleTs = (i) => {
+  const d = Date.parse(i.saleDate);
+  if (!isFinite(d)) return i.updatedAt || 0;
+  return new Date(i.updatedAt || 0).toISOString().slice(0, 10) === i.saleDate ? i.updatedAt : d + 12 * 3600000;
+};
+const deltaPct = (now, before) => (before > 0 ? ((now - before) / before) * 100 : null);
+
+function dashData(items) {
   const active = items.filter((i) => i.status !== "Archived");
   const unsold = active.filter((i) => UNSOLD.includes(i.status));
-  const stockCost = unsold.reduce((s, i) => s + calc(i).tpc, 0);
+  const sold = active.filter((i) => i.status === "Sold" && has(i.actualPrice));
+  const now = Date.now();
+  const inLast = (i, from, to = 0) => { const t = saleTs(i); return t > now - from * DAY && t <= now - to * DAY; };
+  const s30 = sold.filter((i) => inLast(i, 30));
+  const sPrev30 = sold.filter((i) => inLast(i, 60, 30));
+  const sum = (arr, f) => arr.reduce((a, i) => a + f(i), 0);
+  const prof = (i) => calc(i).profit || 0;
   const ym = todayISO().slice(0, 7);
-  const soldMonth = active.filter((i) => i.status === "Sold" && clean(i.saleDate).slice(0, 7) === ym);
-  const profitMonth = soldMonth.reduce((s, i) => s + (calc(i).profit || 0), 0);
-  const quiet = unsold.filter((i) => (calc(i).age || 0) > 30).sort((a, b) => (calc(b).age || 0) - (calc(a).age || 0)).slice(0, 3);
-  const recent = unsold.filter((i) => !quiet.includes(i)).slice(0, 5);
-  const month = new Date().toLocaleDateString("en-GB", { month: "long" });
+  const lastD = new Date(); lastD.setDate(1); lastD.setMonth(lastD.getMonth() - 1);
+  const lym = lastD.toISOString().slice(0, 7);
+  const monthSold = sold.filter((i) => clean(i.saleDate).slice(0, 7) === ym);
+  const lastMonthSold = sold.filter((i) => clean(i.saleDate).slice(0, 7) === lym);
 
-  const Stat = ({ label, value, color, sub }) => (
-    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "13px 14px", flex: 1, minWidth: 0 }}>
-      <div style={{ ...body, fontSize: 12, color: T.sec, fontWeight: 500 }}>{label}</div>
-      <div style={{ ...display, fontSize: 21, fontWeight: 800, color: color || T.text, fontVariantNumeric: "tabular-nums", marginTop: 4, whiteSpace: "nowrap" }}>{value}</div>
-      {sub && <div style={{ ...body, fontSize: 11.5, color: T.dim, marginTop: 2 }}>{sub}</div>}
+  const daily = [];
+  for (let k = 29; k >= 0; k--) {
+    const day = new Date(now - k * DAY).toISOString().slice(0, 10);
+    const ds = sold.filter((i) => i.saleDate === day);
+    daily.push({ day: new Date(day).toLocaleDateString("en-GB", { day: "numeric", month: "short" }), revenue: sum(ds, (i) => num(i.actualPrice)), profit: sum(ds, prof) });
+  }
+  const platMap = {};
+  s30.forEach((i) => { const p = i.platform || "Other"; platMap[p] = (platMap[p] || 0) + num(i.actualPrice); });
+  const platforms = Object.entries(platMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+
+  const topMap = {};
+  s30.forEach((i) => {
+    const key = clean(i.name || i.title).trim().toLowerCase();
+    if (!key) return;
+    const t = topMap[key] || (topMap[key] = { name: i.name || i.title, count: 0, revenue: 0, thumb: i.thumb });
+    t.count++; t.revenue += num(i.actualPrice); if (!t.thumb && i.thumb) t.thumb = i.thumb;
+  });
+  const top = Object.values(topMap).sort((a, b) => b.count - a.count || b.revenue - a.revenue).slice(0, 4);
+
+  const events = [];
+  active.forEach((i) => {
+    if (i.status === "Sold" && has(i.actualPrice)) events.push({ type: "sold", ts: saleTs(i), it: i, amount: num(i.actualPrice) });
+    if (OWNED.includes(i.status)) events.push({ type: "new", ts: i.createdAt || 0, it: i, amount: calc(i).tpc });
+  });
+  events.sort((a, b) => b.ts - a.ts);
+
+  return {
+    unsold, sold,
+    stockCost: sum(unsold, (i) => calc(i).tpc),
+    newThisWeek: unsold.filter((i) => (i.createdAt || 0) > now - 7 * DAY).length,
+    sales30: sum(s30, (i) => num(i.actualPrice)), salesPrev30: sum(sPrev30, (i) => num(i.actualPrice)),
+    profit30: sum(s30, prof), profitPrev30: sum(sPrev30, prof),
+    profitMonth: sum(monthSold, prof), profitLastMonth: sum(lastMonthSold, prof), soldMonth: monthSold.length,
+    daily, platforms, top, events,
+    recentSales: [...sold].sort((a, b) => saleTs(b) - saleTs(a)),
+    quiet: unsold.filter((i) => (calc(i).age || 0) > 30).sort((a, b) => (calc(b).age || 0) - (calc(a).age || 0)),
+  };
+}
+
+/* ---------- dashboard pieces ---------- */
+function Delta({ pct: p, suffix = "" }) {
+  if (p == null || !isFinite(p)) return null;
+  const up = p >= 0;
+  return <span style={{ ...body, fontSize: 12.5, fontWeight: 600, color: up ? T.pos : T.neg, whiteSpace: "nowrap" }}>{up ? "▲" : "▼"} {Math.abs(p).toFixed(0)}%{suffix}</span>;
+}
+function IconTile({ icon: Icon, size = 38 }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: 11, background: T.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <Icon size={size * 0.5} color={T.accent} />
     </div>
   );
-  const Section = ({ title, action, children }) => (
-    <div style={{ marginTop: 22 }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
-        <div style={{ ...display, fontWeight: 700, fontSize: 16 }}>{title}</div>
-        {action}
+}
+function Panel({ title, right, children, style, pad = 18 }) {
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: pad, minWidth: 0, ...style }}>
+      {(title || right) && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+          <div style={{ ...display, fontWeight: 700, fontSize: 16.5 }}>{title}</div>
+          {right}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+const SeeAll = ({ onClick }) => <button onClick={onClick} style={{ background: "none", border: "none", color: T.sec, ...body, fontSize: 13, fontWeight: 500, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 2 }}>See all <ChevronRight size={14} /></button>;
+const RangeTag = ({ label = "Last 30 days" }) => <span style={{ ...body, fontSize: 12, color: T.sec, background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, padding: "5px 9px", whiteSpace: "nowrap" }}>{label}</span>;
+function Thumb({ it, size = 42 }) {
+  const initial = clean((it && (it.brand || it.name)) || "?").trim().charAt(0).toUpperCase() || "?";
+  return (
+    <div style={{ width: size, height: size, borderRadius: 10, background: T.raised, flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", ...display, fontWeight: 700, fontSize: size * 0.38, color: T.sec }}>
+      {it && it.thumb ? <img src={it.thumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initial}
+    </div>
+  );
+}
+
+function StatTile({ label, value, icon, delta, sub }) {
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "14px 14px", minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ ...body, fontSize: 12.5, color: T.sec }}>{label}</div>
+          <div style={{ ...display, fontSize: 24, fontWeight: 800, fontVariantNumeric: "tabular-nums", marginTop: 4, whiteSpace: "nowrap" }}>{value}</div>
+        </div>
+        {icon && <IconTile icon={icon} />}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{children}</div>
+      {(delta != null || sub) && <div style={{ marginTop: 8, display: "flex", gap: 6, alignItems: "center" }}>{delta}{sub && <span style={{ ...body, fontSize: 12, color: T.dim }}>{sub}</span>}</div>}
     </div>
   );
-  const Tool = ({ icon: Icon, label, sub, onClick }) => (
-    <button onClick={onClick} className="vanim" style={{ flex: 1, minWidth: 0, textAlign: "left", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "13px 13px", cursor: "pointer", color: T.text }}>
-      <Icon size={18} color={T.sec} />
-      <div style={{ ...body, fontWeight: 600, fontSize: 13.5, marginTop: 8 }}>{label}</div>
-      <div style={{ ...body, fontSize: 11.5, color: T.dim, marginTop: 2 }}>{sub}</div>
+}
+
+function ActivityList({ events, go, limit }) {
+  if (!events.length) return <div style={{ ...body, fontSize: 13, color: T.dim }}>Nothing yet — add some stock.</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {events.slice(0, limit).map((e, k) => (
+        <div key={k} onClick={() => go({ name: "detail", id: e.it.id })} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderTop: k ? `1px solid ${T.border}` : "none", cursor: "pointer" }}>
+          {e.type === "sold" ? <TrendingUp size={17} color={T.pos} /> : <Package size={17} color={T.accent} />}
+          <Thumb it={e.it} size={40} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...body, fontWeight: 600, fontSize: 14 }}>{e.type === "sold" ? "Sold" : "New stock"}</div>
+            <div style={{ ...body, fontSize: 12.5, color: T.sec, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.it.name || e.it.title}</div>
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ ...display, fontWeight: 700, fontSize: 14.5, fontVariantNumeric: "tabular-nums", color: e.type === "sold" ? T.text : T.sec }}>{gbp(e.amount)}</div>
+            <div style={{ ...body, fontSize: 11.5, color: T.dim }}>{ago(e.ts)}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TopList({ top }) {
+  if (!top.length) return <div style={{ ...body, fontSize: 13, color: T.dim }}>No sales in the last 30 days.</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {top.map((t, k) => (
+        <div key={t.name} style={{ display: "flex", alignItems: "center", gap: 11, background: T.raised, borderRadius: 12, padding: "8px 11px" }}>
+          <span style={{ ...display, fontWeight: 700, fontSize: 13, color: T.sec, width: 22, height: 22, borderRadius: 999, border: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{k + 1}</span>
+          <Thumb it={t} size={36} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...body, fontWeight: 600, fontSize: 13.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
+            <div style={{ ...body, fontSize: 12, color: T.sec }}>{t.count} sold</div>
+          </div>
+          <div style={{ ...display, fontWeight: 700, fontSize: 14.5, fontVariantNumeric: "tabular-nums" }}>{gbp(t.revenue)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const chartTip = { contentStyle: { background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, fontSize: 12 }, labelStyle: { color: T.sec }, formatter: (v) => gbp(v) };
+const axis = { stroke: T.dim, fontSize: 11, tickLine: false, axisLine: false };
+const PLAT_COLORS = [T.accent, "#FF6B81", "#FF9AA8", "#C9C9CF", "#6B6B72"];
+
+function SalesChart({ daily }) {
+  return (
+    <div style={{ height: 190 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={daily} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
+          <defs>
+            <linearGradient id="rhqFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={T.accent} stopOpacity={0.45} />
+              <stop offset="100%" stopColor={T.accent} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke={T.border} vertical={false} />
+          <XAxis dataKey="day" {...axis} interval={6} />
+          <YAxis {...axis} tickFormatter={(v) => "£" + v} />
+          <Tooltip {...chartTip} />
+          <Area type="monotone" dataKey="revenue" name="Sales" stroke={T.accent} strokeWidth={2.2} fill="url(#rhqFill)" dot={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+function ProfitChart({ daily }) {
+  return (
+    <div style={{ height: 190 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={daily} margin={{ top: 6, right: 6, left: -14, bottom: 0 }} barGap={1}>
+          <CartesianGrid stroke={T.border} vertical={false} />
+          <XAxis dataKey="day" {...axis} interval={6} />
+          <YAxis {...axis} tickFormatter={(v) => "£" + v} />
+          <Tooltip {...chartTip} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
+          <Bar dataKey="revenue" name="Revenue" fill="#5A5A62" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="profit" name="Profit" fill={T.accent} radius={[3, 3, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+function PlatformDonut({ platforms, total }) {
+  if (!platforms.length) return <div style={{ ...body, fontSize: 13, color: T.dim }}>No sales in the last 30 days.</div>;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+      <div style={{ width: 150, height: 150, position: "relative", flexShrink: 0 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={platforms} dataKey="value" nameKey="name" innerRadius={50} outerRadius={72} paddingAngle={2} stroke="none">
+              {platforms.map((p, k) => <Cell key={p.name} fill={PLAT_COLORS[k % PLAT_COLORS.length]} />)}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+          <div style={{ ...display, fontWeight: 800, fontSize: 17 }}>{gbp(total)}</div>
+          <div style={{ ...body, fontSize: 11, color: T.sec }}>Total sales</div>
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 120, display: "flex", flexDirection: "column", gap: 9 }}>
+        {platforms.map((p, k) => (
+          <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 8, ...body, fontSize: 13 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 9, background: PLAT_COLORS[k % PLAT_COLORS.length] }} />
+            <span style={{ flex: 1 }}>{p.name}</span>
+            <span style={{ color: T.sec }}>{total ? Math.round((p.value / total) * 100) : 0}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StockTable({ items, go, openSell }) {
+  const th = { ...body, fontSize: 12, color: T.sec, fontWeight: 500, textAlign: "left", padding: "8px 10px", whiteSpace: "nowrap" };
+  const td = { ...body, fontSize: 13.5, padding: "10px 10px", borderTop: `1px solid ${T.border}`, whiteSpace: "nowrap" };
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>{["Item", "Brand", "Size", "Paid", "Sell price", "Status", "Platform", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {items.map((it) => {
+            const c = calc(it);
+            const age = c.age;
+            return (
+              <tr key={it.id} onClick={() => go({ name: "detail", id: it.id })} style={{ cursor: "pointer" }}>
+                <td style={{ ...td, whiteSpace: "normal" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 180 }}>
+                    <Thumb it={it} size={38} />
+                    <span style={{ fontWeight: 600 }}>{it.name || it.title || "Untitled"}</span>
+                  </div>
+                </td>
+                <td style={{ ...td, color: T.sec }}>{it.brand || "—"}</td>
+                <td style={{ ...td, color: T.sec }}>{it.size || "—"}</td>
+                <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{has(it.purchasePrice) ? gbp(c.tpc) : "—"}</td>
+                <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{c.sold ? gbp(num(it.actualPrice)) : has(it.expectedPrice) ? gbp(num(it.expectedPrice)) : "—"}</td>
+                <td style={td}><StatusPill status={UNSOLD.includes(it.status) && it.status === "Purchased" ? "In stock" : it.status} age={age} /></td>
+                <td style={{ ...td, color: T.sec }}>{it.platform || "—"}</td>
+                <td style={{ ...td, textAlign: "right" }}>
+                  {UNSOLD.includes(it.status) && (
+                    <button onClick={(e) => { e.stopPropagation(); openSell(it.id); }} className="vanim"
+                      style={{ background: T.accentSoft, color: T.accent, border: `1px solid ${T.accentLine}`, borderRadius: 9, padding: "6px 11px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Sold</button>
+                  )}
+                  {c.sold && <span style={{ ...display, fontWeight: 700, color: c.profit >= 0 ? T.pos : T.neg }}>{c.profit >= 0 ? "+" : ""}{gbp(c.profit)}</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RecentSalesTable({ sales, go }) {
+  if (!sales.length) return <div style={{ ...body, fontSize: 13, color: T.dim }}>No sales yet.</div>;
+  const th = { ...body, fontSize: 12, color: T.sec, fontWeight: 500, textAlign: "left", padding: "6px 8px", whiteSpace: "nowrap" };
+  const td = { ...body, fontSize: 13, padding: "9px 8px", borderTop: `1px solid ${T.border}`, whiteSpace: "nowrap" };
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr>{["Date", "Item", "Platform", "Sold for", "Costs", "Profit"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>
+          {sales.map((it) => {
+            const c = calc(it);
+            return (
+              <tr key={it.id} onClick={() => go({ name: "detail", id: it.id })} style={{ cursor: "pointer" }}>
+                <td style={{ ...td, color: T.sec }}>{it.saleDate ? new Date(it.saleDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "—"}</td>
+                <td style={{ ...td, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{it.name || it.title}</td>
+                <td style={{ ...td, color: T.sec }}>{it.platform || "—"}</td>
+                <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{gbp(num(it.actualPrice))}</td>
+                <td style={{ ...td, color: T.neg, fontVariantNumeric: "tabular-nums" }}>{c.tsc ? "-" + gbp(c.tsc) : "—"}</td>
+                <td style={{ ...td, fontWeight: 700, color: c.profit >= 0 ? T.pos : T.neg, fontVariantNumeric: "tabular-nums" }}>{gbp(c.profit)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ============================================================
+   HOME — phone
+   ============================================================ */
+function HomeScreen({ go, items, openAdd, openSell }) {
+  const layout = useLayout();
+  const d = useMemo(() => dashData(items), [items]);
+  if (layout !== "phone") return <HomeWide go={go} items={items} d={d} openAdd={openAdd} openSell={openSell} />;
+
+  const QA = ({ icon: Icon, label, onClick, primary }) => (
+    <button onClick={onClick} className="vanim" style={{ flex: 1, minWidth: 0, background: primary ? T.accentSoft : T.surface, border: `1px solid ${primary ? T.accentLine : T.border}`, borderRadius: 14, padding: "13px 4px", display: "flex", flexDirection: "column", alignItems: "center", gap: 7, color: T.text, cursor: "pointer" }}>
+      {primary
+        ? <span style={{ width: 28, height: 28, borderRadius: 28, background: T.accent, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon size={17} color="#fff" strokeWidth={2.6} /></span>
+        : <Icon size={22} color={T.accent} />}
+      <span style={{ ...body, fontSize: 12, fontWeight: 500 }}>{label}</span>
     </button>
+  );
+  const H = ({ children, right }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "22px 0 10px" }}>
+      <div style={{ ...display, fontWeight: 700, fontSize: 18 }}>{children}</div>{right}
+    </div>
   );
 
   return (
-    <div style={{ padding: "calc(18px + env(safe-area-inset-top, 0px)) 18px 28px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <div style={{ ...display, fontWeight: 800, fontSize: 26, letterSpacing: "-0.02em" }}>Resell HQ</div>
-        <button onClick={() => go({ name: "settings" })} aria-label="Settings" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", color: T.sec, cursor: "pointer" }}>
-          <Settings size={17} />
+    <div style={{ padding: "calc(16px + env(safe-area-inset-top, 0px)) 18px 28px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <Logo size={27} />
+        <button onClick={() => go({ name: "settings" })} aria-label="Settings" style={{ background: "none", border: "none", color: T.sec, cursor: "pointer", padding: 6 }}>
+          <Settings size={21} />
         </button>
       </div>
 
-      <div style={{ background: T.accent, color: T.accentInk, borderRadius: 20, padding: "16px 18px", marginBottom: 10 }}>
-        <div style={{ ...body, fontSize: 13, fontWeight: 600, opacity: 0.75 }}>Profit in {month}</div>
-        <div style={{ ...display, fontSize: 38, fontWeight: 800, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{gbp(profitMonth)}</div>
-        <div style={{ ...body, fontSize: 13, fontWeight: 500, opacity: 0.75 }}>{soldMonth.length} sold this month</div>
-      </div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <Stat label="In stock" value={unsold.length} sub="items" />
-        <Stat label="Stock cost" value={gbp(stockCost)} sub="money tied up" />
-      </div>
-
-      <Btn kind="primary" style={{ width: "100%", marginTop: 14, fontSize: 15.5, padding: "15px" }} onClick={openAdd}>
-        <Plus size={18} /> Add stock
-      </Btn>
-
-      {items.length === 0 && (
-        <Empty icon={Boxes} title="Nothing in stock yet" desc="Tap Add stock — it takes about 10 seconds per item." />
-      )}
-
-      {quiet.length > 0 && (
-        <Section title="Sitting too long">
-          {quiet.map((it) => <ItemRow key={it.id} it={it} onOpen={() => go({ name: "detail", id: it.id })} onSell={openSell} />)}
-        </Section>
-      )}
-
-      {recent.length > 0 && (
-        <Section title="Recently added" action={<button onClick={() => go({ name: "stock" })} style={{ background: "none", border: "none", color: T.sec, ...body, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>See all</button>}>
-          {recent.map((it) => <ItemRow key={it.id} it={it} onOpen={() => go({ name: "detail", id: it.id })} onSell={openSell} />)}
-        </Section>
-      )}
-
-      <div style={{ marginTop: 22 }}>
-        <div style={{ ...display, fontWeight: 700, fontSize: 16, marginBottom: 10 }}>Tools</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Tool icon={Sparkles} label="Listing writer" sub="AI from photos" onClick={() => go({ name: "generator" })} />
-          <Tool icon={ScanSearch} label="Buy checker" sub="AI, rough guide" onClick={() => go({ name: "checker" })} />
-          <Tool icon={BarChart3} label="Stats" sub="All-time numbers" onClick={() => go({ name: "analytics" })} />
+      <div style={{ background: `linear-gradient(135deg, ${T.raised}, ${T.surface})`, border: `1px solid ${T.border}`, borderRadius: 18, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ ...body, fontSize: 13.5, color: T.sec }}>Total profit (this month)</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 4 }}>
+            <span style={{ ...display, fontSize: 36, fontWeight: 800, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{gbp(d.profitMonth)}</span>
+            <Delta pct={deltaPct(d.profitMonth, d.profitLastMonth)} />
+          </div>
         </div>
+        <BarChart3 size={38} color={T.accent} strokeWidth={2.6} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 10 }}>
+        {[[Boxes, "Stock value", gbp(d.stockCost)], [Tag, "Items", d.unsold.length], [BarChart3, "Sales (30d)", gbp(d.sales30)]].map(([I, l, v]) => (
+          <div key={l} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, padding: "12px 11px", minWidth: 0 }}>
+            <IconTile icon={I} size={30} />
+            <div style={{ ...body, fontSize: 12, color: T.sec, marginTop: 9 }}>{l}</div>
+            <div style={{ ...display, fontSize: 18, fontWeight: 800, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <H right={<SeeAll onClick={() => go({ name: "stock" })} />}>Recent activity</H>
+      <Panel pad="6px 14px"><ActivityList events={d.events} go={go} limit={4} /></Panel>
+
+      <H>Quick actions</H>
+      <div style={{ display: "flex", gap: 8 }}>
+        <QA icon={Plus} label="Add item" onClick={openAdd} primary />
+        <QA icon={Check} label="New sale" onClick={() => go({ name: "stock" })} />
+        <QA icon={Sparkles} label="Listing" onClick={() => go({ name: "generator" })} />
+        <QA icon={ScanSearch} label="Checker" onClick={() => go({ name: "checker" })} />
+      </div>
+
+      {d.quiet.length > 0 && (
+        <>
+          <H>Sitting too long</H>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {d.quiet.slice(0, 3).map((it) => <ItemRow key={it.id} it={it} onOpen={() => go({ name: "detail", id: it.id })} onSell={openSell} />)}
+          </div>
+        </>
+      )}
+
+      <H right={<RangeTag />}>Top selling items</H>
+      <TopList top={d.top} />
+    </div>
+  );
+}
+
+/* ============================================================
+   HOME — tablet / laptop dashboard
+   ============================================================ */
+function HomeWide({ go, items, d, openAdd, openSell }) {
+  const layout = useLayout();
+  const [cat, setCat] = useState("All");
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const stock = d.unsold.filter((i) => cat === "All" || clean(i.category).toLowerCase() === cat.toLowerCase()).slice(0, 8);
+  const cats = ["All", ...[...new Set(d.unsold.map((i) => i.category).filter(Boolean))].slice(0, 4)];
+  const cols = layout === "desktop";
+
+  return (
+    <div style={{ padding: "28px 28px 40px", maxWidth: 1360, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 22, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ ...display, fontWeight: 800, fontSize: 28, letterSpacing: "-0.02em" }}>{greet}, Mason</div>
+          <div style={{ ...body, fontSize: 14.5, color: T.sec, marginTop: 4 }}>Here's how the reselling's going.</div>
+        </div>
+        <RangeTag />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        <StatTile label="Stock value (cost)" value={gbp(d.stockCost)} icon={Boxes} />
+        <StatTile label="Items in stock" value={d.unsold.length} icon={Tag} sub={d.newThisWeek ? `${d.newThisWeek} new this week` : null} />
+        <StatTile label="Total sales" value={gbp(d.sales30)} icon={BarChart3} delta={<Delta pct={deltaPct(d.sales30, d.salesPrev30)} />} sub="vs previous 30d" />
+        <StatTile label="Profit" value={gbp(d.profit30)} icon={TrendingUp} delta={<Delta pct={deltaPct(d.profit30, d.profitPrev30)} />} sub="vs previous 30d" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: cols ? "1fr 1fr 0.9fr" : "1fr 1fr", gap: 12, marginTop: 12 }}>
+        <Panel title="Sales overview" right={<RangeTag />}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+            <span style={{ ...display, fontSize: 26, fontWeight: 800 }}>{gbp(d.sales30)}</span>
+            <Delta pct={deltaPct(d.sales30, d.salesPrev30)} />
+          </div>
+          <SalesChart daily={d.daily} />
+        </Panel>
+        <Panel title="Profit overview" right={<RangeTag />}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+            <span style={{ ...display, fontSize: 26, fontWeight: 800 }}>{gbp(d.profit30)}</span>
+            <Delta pct={deltaPct(d.profit30, d.profitPrev30)} />
+          </div>
+          <ProfitChart daily={d.daily} />
+        </Panel>
+        <Panel title="Sales by platform" style={cols ? {} : { gridColumn: "1 / -1" }}>
+          <PlatformDonut platforms={d.platforms} total={d.sales30} />
+        </Panel>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: cols ? "2.1fr 0.9fr" : "1fr", gap: 12, marginTop: 12 }}>
+        <Panel title="Current stock" right={
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {cats.length > 1 && cats.map((c) => <Chip key={c} label={c} small active={cat === c} onClick={() => setCat(c)} color={T.accent} />)}
+            <Btn kind="accent" onClick={openAdd} style={{ padding: "8px 13px", fontSize: 13 }}><Plus size={15} /> Add item</Btn>
+          </div>
+        }>
+          {stock.length ? <StockTable items={stock} go={go} openSell={openSell} /> : <div style={{ ...body, fontSize: 13, color: T.dim }}>No unsold stock.</div>}
+          {d.unsold.length > stock.length && <div style={{ marginTop: 10 }}><SeeAll onClick={() => go({ name: "stock" })} /></div>}
+        </Panel>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Panel title="Top selling items" right={<RangeTag />}><TopList top={d.top} /></Panel>
+          <Panel title="Recent activity"><ActivityList events={d.events} go={go} limit={5} /></Panel>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <Panel title="Recent sales" right={<SeeAll onClick={() => go({ name: "stock" })} />}>
+          <RecentSalesTable sales={d.recentSales.slice(0, 6)} go={go} />
+        </Panel>
       </div>
     </div>
   );
@@ -823,6 +1259,7 @@ function HomeScreen({ go, items, openAdd, openSell }) {
    STOCK LIST
    ============================================================ */
 function StockScreen({ items, go, openAdd, openSell }) {
+  const wide = useLayout() !== "phone";
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("In stock");
   const [sort, setSort] = useState("Newest");
@@ -861,7 +1298,7 @@ function StockScreen({ items, go, openAdd, openSell }) {
     <>
       <ScreenHeader title="Stock"
         right={<Btn kind="accent" style={{ padding: "9px 14px", fontSize: 13.5 }} onClick={openAdd}><Plus size={16} /> Add</Btn>} />
-      <div style={{ padding: "14px 18px 24px" }}>
+      <div style={{ padding: wide ? "20px 28px 32px" : "14px 18px 24px", maxWidth: wide ? 1360 : undefined, margin: "0 auto" }}>
         <div style={{ display: "flex", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 13, padding: 3, marginBottom: 10 }}>
           {["In stock", "Sold", "All"].map((t) => (
             <button key={t} onClick={() => setTab(t)} style={{ flex: 1, background: tab === t ? T.raised : "none", color: tab === t ? T.text : T.sec, border: "none", borderRadius: 10, padding: "9px 6px", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>
@@ -896,9 +1333,13 @@ function StockScreen({ items, go, openAdd, openSell }) {
             <Empty icon={Search} title="Nothing here" desc={q ? "Nothing matches that search." : tab === "Sold" ? "No sales yet." : "No unsold stock."} />
           )
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {filtered.map((it) => <ItemRow key={it.id} it={it} onOpen={() => go({ name: "detail", id: it.id })} onSell={openSell} />)}
-          </div>
+          wide ? (
+            <Panel pad="8px 12px"><StockTable items={filtered} go={go} openSell={openSell} /></Panel>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {filtered.map((it) => <ItemRow key={it.id} it={it} onOpen={() => go({ name: "detail", id: it.id })} onSell={openSell} />)}
+            </div>
+          )
         )}
       </div>
     </>
@@ -2108,7 +2549,7 @@ function BottomNav({ screen, go, openAdd }) {
     { id: "home", label: "Home", icon: Home },
     { id: "stock", label: "Stock", icon: Package },
     { id: "add", label: "", icon: Plus, raised: true },
-    { id: "analytics", label: "Stats", icon: BarChart3 },
+    { id: "analytics", label: "Analytics", icon: BarChart3 },
     { id: "settings", label: "More", icon: Settings },
   ];
   return (
@@ -2119,14 +2560,14 @@ function BottomNav({ screen, go, openAdd }) {
         if (it.raised) {
           return (
             <button key={it.id} onClick={openAdd} aria-label="Add stock" className="vanim"
-              style={{ width: 52, height: 52, borderRadius: 18, background: T.accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -20, boxShadow: "0 6px 20px rgba(212,255,58,0.25)" }}>
+              style={{ width: 52, height: 52, borderRadius: 18, background: T.accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginTop: -20, boxShadow: "0 6px 20px rgba(239,59,69,0.35)" }}>
               <Icon size={25} color={T.accentInk} strokeWidth={2.6} />
             </button>
           );
         }
         return (
           <button key={it.id} onClick={() => go({ name: it.id })} className="vanim"
-            style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "4px 10px", cursor: "pointer", color: activeN ? T.text : T.sec }}>
+            style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "4px 10px", cursor: "pointer", color: activeN ? T.accent : T.sec }}>
             <Icon size={21} strokeWidth={activeN ? 2.4 : 2} />
             <span style={{ ...body, fontSize: 10.5, fontWeight: activeN ? 600 : 500 }}>{it.label}</span>
           </button>
@@ -2166,6 +2607,8 @@ function Toast({ msg }) {
 }
 
 function AppShell({ isDesktop }) {
+  const layout = useViewportMode();
+  const wide = layout !== "phone";
   const [screen, setScreen] = useState({ name: "home" });
   const [items, setItems] = useState([]);
   const [checks, setChecks] = useState([]);
@@ -2261,20 +2704,28 @@ function AppShell({ isDesktop }) {
 
   const sellItem = sheet && sheet.type === "sell" ? items.find((i) => i.id === sheet.id) : null;
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: T.bg, color: T.text, overflow: "hidden", position: "relative" }}>
-      {isDesktop && <StatusBar />}
-      <div key={screen.name + (screen.id || "")} className="vscroll vfade" style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain" }}>
-        {content}
-      </div>
-      <Toast msg={toastMsg} />
-      <BottomNav screen={screen.name} go={go} openAdd={openAdd} />
-      {sheet && sheet.type === "add" && (
-        <QuickAddSheet items={items} onClose={() => setSheet(null)} saveItem={saveItem} toast={toast}
-          openFull={(prefill) => { setSheet(null); setEditPrefill(prefill); setScreen({ name: "edit", id: null }); }} />
-      )}
-      {sellItem && <SellSheet it={sellItem} onClose={() => setSheet(null)} updateItem={updateItem} toast={toast} />}
+  const fullWidth = ["home", "stock"].includes(screen.name) || !loaded;
+  const main = (
+    <div key={screen.name + (screen.id || "")} className="vscroll vfade" style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", minWidth: 0 }}>
+      {wide && !fullWidth ? <div style={{ maxWidth: 760, margin: "0 auto" }}>{content}</div> : content}
     </div>
+  );
+
+  return (
+    <LayoutCtx.Provider value={layout}>
+      <div style={{ display: "flex", flexDirection: wide ? "row" : "column", height: "100%", background: T.bg, color: T.text, overflow: "hidden", position: "relative" }}>
+        {isDesktop && !wide && <StatusBar />}
+        {wide && <Sidebar screen={screen.name} go={go} openAdd={openAdd} compact={layout === "tablet"} />}
+        {main}
+        <Toast msg={toastMsg} />
+        {!wide && <BottomNav screen={screen.name} go={go} openAdd={openAdd} />}
+        {sheet && sheet.type === "add" && (
+          <QuickAddSheet items={items} onClose={() => setSheet(null)} saveItem={saveItem} toast={toast}
+            openFull={(prefill) => { setSheet(null); setEditPrefill(prefill); setScreen({ name: "edit", id: null }); }} />
+        )}
+        {sellItem && <SellSheet it={sellItem} onClose={() => setSheet(null)} updateItem={updateItem} toast={toast} />}
+      </div>
+    </LayoutCtx.Provider>
   );
 }
 

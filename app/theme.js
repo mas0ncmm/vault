@@ -7,8 +7,8 @@
    ============================================================ */
 
 export const T = {
-  bg: "#0B0B0C",
-  surface: "#151517",
+  bg: "#0A0A0B",
+  surface: "#141416",
   raised: "#1D1D20",
   border: "#29292D",
   text: "#F5F5F4",
@@ -19,12 +19,13 @@ export const T = {
   a3: "#60A5FA",
   a4: "#A3A3A8",
   a5: "#F87171",
-  accent: "#D4FF3A",
-  accentInk: "#0B0B0C",
-  accentSoft: "rgba(212,255,58,0.10)",
+  accent: "#EF3B45",
+  accentInk: "#FFFFFF",
+  accentSoft: "rgba(239,59,69,0.14)",
+  accentLine: "rgba(239,59,69,0.35)",
   pos: "#4ADE80",
   posSoft: "rgba(74,222,128,0.12)",
-  neg: "#F87171",
+  neg: "#FF7A7A",
   negSoft: "rgba(248,113,113,0.12)",
   blue: "#60A5FA",
 };
@@ -40,7 +41,7 @@ export const globalCss = `
   .vscroll::-webkit-scrollbar { display: none; }
   .vscroll { scrollbar-width: none; }
   input, select, textarea, button { font-family: 'Inter', system-ui, sans-serif; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid rgba(212,255,58,0.55); outline-offset: 0; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid rgba(239,59,69,0.6); outline-offset: 0; }
   input::placeholder, textarea::placeholder { color: #6B6B72; }
   .vanim { transition: transform 0.12s ease, opacity 0.12s ease; }
   .vanim:active { transform: scale(0.97); }
@@ -59,7 +60,7 @@ export const UNSOLD = ["Purchased","Draft","Ready to List","Listed","Reserved"];
 export const OWNED = ["Purchased","Draft","Ready to List","Listed","Reserved","Sold","Returned"];
 export const STATUS_COLOR = {
   Considering: T.a4, Purchased: T.a4, Draft: T.a4, "Ready to List": T.a2,
-  Listed: T.a3, Reserved: T.a2, Sold: T.a1, Returned: T.a5, Rejected: T.a5, Archived: T.dim,
+  Listed: T.a3, Reserved: T.a2, Sold: T.a1, "In stock": T.pos, Returned: T.a5, Rejected: T.a5, Archived: T.dim,
 };
 export const CONDITIONS = ["New with tags","New without tags","Very good","Good","Satisfactory"];
 export const PLATFORMS = ["Vinted","eBay","Depop","Facebook Marketplace","Other"];
