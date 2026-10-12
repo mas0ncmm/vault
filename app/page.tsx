@@ -5,6 +5,7 @@ import {
   ChevronLeft, Wifi, Signal, BatteryFull, Boxes, X, Camera, Trash2, Copy, Check,
   Pencil, Archive, RotateCcw, Search, Download, Upload, AlertTriangle, Clock,
   ExternalLink, RefreshCw, Info, TrendingUp, Tag, ShieldAlert, Layers,
+  Coins, ShoppingCart, Box, Percent, CalendarDays,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -2148,241 +2149,280 @@ function groupStats(list) {
   };
 }
 
-function AnalyticsScreen({ items, checks, go }) {
+function prevWindow(range) {
+  /* the window right before the selected one, for the % change */
+  const now = new Date();
+  if (!range) return null;
+  if (range === "month") { const s = new Date(now.getFullYear(), now.getMonth() - 1, 1); const e = new Date(now.getFullYear(), now.getMonth(), 1); return [s, e]; }
+  if (range === "year") return [new Date(now.getFullYear() - 1, 0, 1), new Date(now.getFullYear(), 0, 1)];
+  return [new Date(now - range * 2 * DAY), new Date(now - range * DAY)];
+}
+const inWindow = (dateStr, w) => { if (!dateStr) return false; const d = new Date(dateStr); return d >= w[0] && d < w[1]; };
+const ALL_PLATFORMS = ["Vinted", "eBay", "Depop", "Shopify", "Other"];
+const PLAT_COL = { Vinted: T.accent, eBay: "#FF9AA8", Depop: "#FB923C", Shopify: "#A78BFA", Other: "#8A8A92" };
+
+function AnalyticsScreen({ items, go }) {
+  const layout = useLayout();
+  const wide = layout !== "phone";
   const [tab, setTab] = useState("Overview");
   const [range, setRange] = useState("All time");
-  const active = items.filter((i) => i.status !== "Archived");
+  const [series, setSeries] = useState("Both");
   const r = RANGES[range];
+  const active = items.filter((i) => i.status !== "Archived");
   const scoped = active.filter((i) => {
     if (!r) return true;
     if (i.status === "Sold") return inRange(i.saleDate, r);
     return inRange(i.purchaseDate || new Date(i.createdAt).toISOString().slice(0, 10), r);
   });
   const g = groupStats(scoped);
-  const soldAll = active.filter((i) => i.status === "Sold");
+  const sold = scoped.filter((i) => i.status === "Sold");
+  const owned = scoped.filter((i) => OWNED.includes(i.status));
+
+  const pw = prevWindow(r);
+  const prevSold = pw ? active.filter((i) => i.status === "Sold" && inWindow(i.saleDate, pw)) : [];
+  const prevRev = prevSold.reduce((s, i) => s + num(i.actualPrice), 0);
+  const prevProf = prevSold.reduce((s, i) => s + (calc(i).profit || 0), 0);
+  const delta = (now, before) => (pw ? deltaPct(now, before) ?? (now > 0 ? 100 : null) : null);
 
   const monthly = useMemo(() => {
     const out = [];
     const now = new Date();
+    const soldAll = active.filter((i) => i.status === "Sold" && i.saleDate);
     for (let m = 5; m >= 0; m--) {
       const d = new Date(now.getFullYear(), now.getMonth() - m, 1);
-      const label = d.toLocaleDateString("en-GB", { month: "short" });
-      const monthSold = soldAll.filter((i) => {
-        if (!i.saleDate) return false;
-        const s = new Date(i.saleDate);
-        return s.getMonth() === d.getMonth() && s.getFullYear() === d.getFullYear();
-      });
+      const ms = soldAll.filter((i) => { const s = new Date(i.saleDate); return s.getMonth() === d.getMonth() && s.getFullYear() === d.getFullYear(); });
       out.push({
-        m: label,
-        Revenue: +monthSold.reduce((s, i) => s + num(i.actualPrice), 0).toFixed(2),
-        Profit: +monthSold.reduce((s, i) => s + (calc(i).profit || 0), 0).toFixed(2),
+        m: d.toLocaleDateString("en-GB", { month: "short" }),
+        full: d.toLocaleDateString("en-GB", { month: "short", year: "numeric" }),
+        Revenue: +ms.reduce((s, i) => s + num(i.actualPrice), 0).toFixed(2),
+        Profit: +ms.reduce((s, i) => s + (calc(i).profit || 0), 0).toFixed(2),
       });
     }
     return out;
   }, [items]);
 
-  const byKey = (key) => {
+  const group = (keyFn) => {
     const map = {};
-    scoped.forEach((i) => {
-      const k = clean(i[key]).trim() || "(none)";
-      if (!map[k]) map[k] = [];
-      map[k].push(i);
-    });
-    return Object.entries(map).map(([name, list]) => ({ name, ...groupStats(list) }))
-      .sort((x, y) => y.profit - x.profit);
+    scoped.forEach((i) => { const k = keyFn(i) || "(none)"; (map[k] = map[k] || []).push(i); });
+    return Object.entries(map).map(([name, list]) => ({ name, list, thumb: (list.find((x) => x.thumb) || {}).thumb, ...groupStats(list) }))
+      .sort((a, b) => b.sold - a.sold || b.profit - a.profit);
   };
+  const brands = group((i) => clean(i.brand).trim()).filter((b) => b.name !== "(none)" || b.sold);
+  const categories = group((i) => clean(i.category).trim()).filter((c) => c.name !== "(none)" || c.sold);
+  const topItems = group((i) => clean(i.name || i.title).trim()).filter((x) => x.sold).slice(0, 3);
+  const platRev = {};
+  sold.forEach((i) => { const p = ALL_PLATFORMS.includes(i.platform) ? i.platform : "Other"; platRev[p] = (platRev[p] || 0) + 1; });
 
   const ageBuckets = useMemo(() => {
-    const defs = [["Under 7 days", 0, 7], ["7–14 days", 7, 15], ["15–30 days", 15, 31], ["31–60 days", 31, 61], ["61–90 days", 61, 91], ["Over 90 days", 91, 1e9]];
+    const defs = [["Under 7 days", 0, 7], ["7–30 days", 7, 31], ["31–60 days", 31, 61], ["61–90 days", 61, 91], ["Over 90 days", 91, 1e9]];
     const unsold = active.filter((i) => UNSOLD.includes(i.status));
     return defs.map(([label, lo, hi]) => {
-      const list = unsold.filter((i) => {
-        const a = calc(i).age;
-        return a != null && a >= lo && a < hi;
-      });
-      return { label, count: list.length, invested: list.reduce((s, i) => s + calc(i).tpc, 0), estValue: list.reduce((s, i) => s + num(i.expectedPrice), 0), items: list };
+      const list = unsold.filter((i) => { const a = calc(i).age ?? 0; return a >= lo && a < hi; });
+      return { label, list, invested: list.reduce((s, i) => s + calc(i).tpc, 0) };
     });
   }, [items]);
 
-  const insights = useMemo(() => {
-    const out = [];
-    const sold = scoped.filter((i) => i.status === "Sold");
-    const brandsG = byKey("brand").filter((b) => b.name !== "(none)");
-    if (brandsG.length && brandsG[0].sold >= 2) out.push(`${brandsG[0].name} generated your highest total profit (${gbp(brandsG[0].profit)}) in this period.`);
-    const catsG = byKey("category").filter((c) => c.name !== "(none)" && c.unsold > 0).sort((a, b) => b.invested - a.invested);
-    if (catsG.length && catsG[0].invested > 0) out.push(`${catsG[0].name} has the most money tied up in unsold stock (${gbp(catsG[0].invested)}).`);
-    const old60 = active.filter((i) => (calc(i).age || 0) > 60).length;
-    if (old60 > 0) out.push(`${old60} item${old60 > 1 ? "s have" : " has"} been unsold for more than 60 days — consider price drops or relisting.`);
-    if (sold.length >= 4) {
-      const bands = [["£0–£10", 0, 10], ["£10–£20", 10, 20], ["£20–£40", 20, 40], ["£40+", 40, 1e9]];
-      const best = bands.map(([lab, lo, hi]) => {
-        const list = sold.filter((i) => num(i.actualPrice) >= lo && num(i.actualPrice) < hi);
-        const d = list.map((i) => calc(i).daysToSell).filter((x) => x != null);
-        return { lab, n: list.length, avg: d.length ? d.reduce((a, b) => a + b, 0) / d.length : null };
-      }).filter((b) => b.n >= 2 && b.avg != null).sort((a, b) => a.avg - b.avg)[0];
-      if (best) out.push(`Items priced ${best.lab} sold fastest (avg ${Math.round(best.avg)} days).`);
-    }
-    const withEst = soldAll.filter((i) => i.estSnapshot);
-    if (withEst.length >= 2) {
-      const goodRated = withEst.filter((i) => ["Good", "Really Good"].includes(i.estSnapshot.rating));
-      const rest = withEst.filter((i) => !["Good", "Really Good"].includes(i.estSnapshot.rating));
-      if (goodRated.length >= 2 && rest.length >= 2) {
-        const avg = (l) => l.reduce((s, i) => s + (calc(i).profit || 0), 0) / l.length;
-        out.push(`Items the checker rated Good or better averaged ${gbp(avg(goodRated))} profit vs ${gbp(avg(rest))} for lower-rated buys.`);
-      }
-    }
-    return out;
-  }, [items, range]);
+  /* ---------- pieces ---------- */
+  const Card4 = ({ label, value, icon, sub, d }) => (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: "15px 14px", minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ ...body, fontSize: 13, color: T.sec, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+        <IconTile icon={icon} size={34} />
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginTop: -6 }}>
+        <span style={{ ...display, fontSize: 25, fontWeight: 800, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.01em" }}>{value}</span>
+        {d != null && isFinite(d) && <span style={{ ...body, fontSize: 12, fontWeight: 600, color: d >= 0 ? T.pos : T.neg }}>{d >= 0 ? "↗ +" : "↘ "}{d.toFixed(0)}%</span>}
+      </div>
+      {sub && <div style={{ ...body, fontSize: 13, color: T.sec, marginTop: 6 }}>{sub}</div>}
+    </div>
+  );
+  const Card3 = ({ label, value, icon }) => (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "12px 12px", minWidth: 0, display: "flex", justifyContent: "space-between", gap: 6 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ ...body, fontSize: 12.5, color: T.sec, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+        <div style={{ ...display, fontSize: 21, fontWeight: 800, fontVariantNumeric: "tabular-nums", marginTop: 6, whiteSpace: "nowrap" }}>{value}</div>
+      </div>
+      <IconTile icon={icon} size={32} />
+    </div>
+  );
+  const ShareBar = ({ pct: p }) => (
+    <div style={{ height: 5, borderRadius: 5, background: T.raised, marginTop: 7, overflow: "hidden" }}>
+      <div style={{ width: `${Math.max(0, Math.min(100, p))}%`, height: "100%", background: T.accent, borderRadius: 5 }} />
+    </div>
+  );
+  const ShareRow = ({ name, thumb, count, total, extra, onClick }) => (
+    <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", cursor: onClick ? "pointer" : "default" }}>
+      <Thumb it={{ thumb, name }} size={40} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+          <span style={{ ...body, fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+          {total != null && <span style={{ ...body, fontWeight: 600, fontSize: 13.5 }}>{total ? Math.round((count / total) * 100) : 0}%</span>}
+        </div>
+        <div style={{ ...body, fontSize: 12.5, color: T.sec }}>{count} sale{count === 1 ? "" : "s"}{extra}</div>
+        {total != null && <ShareBar pct={total ? (count / total) * 100 : 0} />}
+      </div>
+    </div>
+  );
+  const PanelHead = ({ title, onMore }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+      <span style={{ ...display, fontWeight: 700, fontSize: 16.5 }}>{title}</span>
+      {onMore && <button onClick={onMore} aria-label={"More " + title} style={{ background: "none", border: "none", color: T.sec, cursor: "pointer", padding: 2 }}><ChevronRight size={18} /></button>}
+    </div>
+  );
+  const box = { background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: 16, minWidth: 0 };
+  const empty = (t) => <div style={{ ...body, fontSize: 13, color: T.dim }}>{t}</div>;
 
-  const decisions = useMemo(() => {
-    const counts = {};
-    RATINGS.forEach((rt) => (counts[rt] = 0));
-    checks.forEach((c) => { if (c.analysis && counts[c.analysis.rating] != null) counts[c.analysis.rating]++; });
-    const purchased = checks.filter((c) => c.outcome === "Purchased").length;
-    const rejected = checks.filter((c) => c.outcome === "Rejected").length;
-    const soldWithEst = active.filter((i) => i.status === "Sold" && i.estSnapshot && has(i.actualPrice));
-    let priceErr = null, profitDiff = null, profitablePct = null;
-    if (soldWithEst.length) {
-      const errs = soldWithEst.map((i) => Math.abs(num(i.actualPrice) - i.estSnapshot.priceLikely) / Math.max(1, i.estSnapshot.priceLikely) * 100);
-      priceErr = errs.reduce((a, b) => a + b, 0) / errs.length;
-      const diffs = soldWithEst.map((i) => (calc(i).profit || 0) - i.estSnapshot.profitLikely);
-      profitDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
-      profitablePct = (soldWithEst.filter((i) => (calc(i).profit || 0) > 0).length / soldWithEst.length) * 100;
-    }
-    return { counts, purchased, rejected, total: checks.length, priceErr, profitDiff, profitablePct, soldN: soldWithEst.length };
-  }, [checks, items]);
+  const overview = (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: wide ? "repeat(4, 1fr)" : "1fr 1fr", gap: 10 }}>
+        <Card4 label="Total revenue" value={gbp(g.revenue)} icon={BarChart3} sub={`${g.sold} sale${g.sold === 1 ? "" : "s"}`} d={delta(g.revenue, prevRev)} />
+        <Card4 label="Total profit" value={gbp(g.profit)} icon={Coins} sub={`${g.sold} sale${g.sold === 1 ? "" : "s"}`} d={delta(g.profit, prevProf)} />
+        <Card4 label="Stock spend" value={gbp(g.spend)} icon={ShoppingCart} sub={`${owned.length} purchase${owned.length === 1 ? "" : "s"}`} />
+        <Card4 label="Invested (unsold)" value={gbp(g.invested)} icon={Box} sub={`${g.unsold} item${g.unsold === 1 ? "" : "s"}`} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
+        <Card3 label="Avg profit / sale" value={g.avgProfit == null ? "—" : gbp(g.avgProfit)} icon={TrendingUp} />
+        <Card3 label="Avg margin" value={pct(g.avgMargin)} icon={Percent} />
+        <Card3 label="Avg days to sell" value={g.avgDays == null ? "—" : Math.round(g.avgDays)} icon={CalendarDays} />
+      </div>
 
-  const tabs = ["Overview", "Brands", "Categories", "Stock age", "Insights"];
-  const listBlock = (rowsV) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {rowsV.length === 0 && <Banner icon={Info}>No data yet for this period.</Banner>}
-      {rowsV.map((b) => (
-        <Card key={b.name}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-            <div style={{ ...body, fontWeight: 600, fontSize: 14.5 }}>{b.name}</div>
-            <div style={{ ...display, fontWeight: 700, fontSize: 15, color: b.profit > 0 ? T.pos : b.profit < 0 ? T.neg : T.text, fontVariantNumeric: "tabular-nums" }}>{gbp(b.profit)}</div>
-          </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {[["Sold", `${b.sold}/${b.purchased}`], ["Revenue", gbp(b.revenue)], ["Avg margin", pct(b.avgMargin)], ["Invested", gbp(b.invested)], b.avgDays != null ? ["Avg days", Math.round(b.avgDays)] : null].filter(Boolean).map(([k, v]) => (
-              <span key={k} style={{ ...body, fontSize: 11.5, color: T.sec }}>{k} <b style={{ color: T.text }}>{v}</b></span>
+      <div style={{ ...box, marginTop: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+          <span style={{ ...display, fontWeight: 700, fontSize: 17 }}>Revenue & profit</span>
+          <div style={{ display: "flex", background: T.raised, border: `1px solid ${T.border}`, borderRadius: 999, padding: 3 }}>
+            {["Both", "Revenue", "Profit"].map((s) => (
+              <button key={s} onClick={() => setSeries(s)} style={{ background: series === s ? T.accentSoft : "none", color: series === s ? T.text : T.sec, border: series === s ? `1px solid ${T.accentLine}` : "1px solid transparent", borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>{s}</button>
             ))}
           </div>
-        </Card>
+        </div>
+        <div style={{ height: 230 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={monthly} margin={{ top: 8, right: 4, left: -16, bottom: 0 }} barGap={4}>
+              <CartesianGrid stroke={T.border} strokeDasharray="0" />
+              <XAxis dataKey="m" {...axis} />
+              <YAxis {...axis} tickFormatter={(v) => "£" + v} />
+              <Tooltip contentStyle={chartTip.contentStyle} labelStyle={chartTip.labelStyle} formatter={(v) => gbp(v)} cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                labelFormatter={(l, p) => (p && p[0] && p[0].payload.full) || l} />
+              {series !== "Profit" && <Bar dataKey="Revenue" fill="#7A1C24" radius={[4, 4, 0, 0]} maxBarSize={34} />}
+              {series !== "Revenue" && <Bar dataKey="Profit" fill={T.accent} radius={[4, 4, 0, 0]} maxBarSize={34} />}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: wide ? "1.1fr 1fr 1fr 1fr" : "1fr 1fr", gap: 10, marginTop: 10 }}>
+        <div style={box}>
+          <PanelHead title="Sales by platform" />
+          {!sold.length ? empty("No sales yet.") : (
+            <div style={{ display: "flex", flexDirection: wide ? "row" : "column", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 120, height: 120, position: "relative", flexShrink: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={ALL_PLATFORMS.filter((p) => platRev[p]).map((p) => ({ name: p, value: platRev[p] }))} dataKey="value" innerRadius={38} outerRadius={58} paddingAngle={sold.length > 1 ? 2 : 0} stroke="none">
+                      {ALL_PLATFORMS.filter((p) => platRev[p]).map((p) => <Cell key={p} fill={PLAT_COL[p]} />)}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ ...display, fontWeight: 800, fontSize: 19 }}>{sold.length}</div>
+                  <div style={{ ...body, fontSize: 10.5, color: T.sec }}>Total sales</div>
+                </div>
+              </div>
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 7 }}>
+                {ALL_PLATFORMS.map((p) => (
+                  <div key={p} style={{ display: "flex", alignItems: "center", gap: 7, ...body, fontSize: 12.5 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 9, background: PLAT_COL[p], flexShrink: 0 }} />
+                    <span style={{ flex: 1, color: T.sec }}>{p}</span>
+                    <span style={{ fontWeight: 600 }}>{Math.round(((platRev[p] || 0) / sold.length) * 100)}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={box}>
+          <PanelHead title="Top categories" onMore={() => setTab("Categories")} />
+          {categories.filter((c) => c.sold).length ? categories.filter((c) => c.sold).slice(0, 3).map((c) => <ShareRow key={c.name} name={c.name} thumb={c.thumb} count={c.sold} total={g.sold} />) : empty("No sales yet.")}
+        </div>
+        <div style={box}>
+          <PanelHead title="Top brands" onMore={() => setTab("Brands")} />
+          {brands.filter((b) => b.sold).length ? brands.filter((b) => b.sold).slice(0, 3).map((b) => <ShareRow key={b.name} name={b.name} thumb={b.thumb} count={b.sold} total={g.sold} />) : empty("No sales yet.")}
+        </div>
+        <div style={box}>
+          <PanelHead title="Top items" onMore={() => go({ name: "stock" })} />
+          {topItems.length ? topItems.map((t) => (
+            <ShareRow key={t.name} name={t.name} thumb={t.thumb} count={t.sold} onClick={t.list.length === 1 ? () => go({ name: "detail", id: t.list[0].id }) : undefined}
+              extra={<> · <span style={{ color: t.profit >= 0 ? T.pos : T.neg }}>{gbp(t.profit)} profit</span></>} />
+          )) : empty("No sales yet.")}
+        </div>
+      </div>
+    </>
+  );
+
+  const groupTable = (rows, label) => (
+    rows.length ? (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {rows.map((x) => (
+          <div key={x.name} style={{ ...box, padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+              <Thumb it={{ thumb: x.thumb, name: x.name }} size={42} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ ...body, fontWeight: 600, fontSize: 15 }}>{x.name}</div>
+                <div style={{ ...body, fontSize: 12.5, color: T.sec }}>{x.sold} sold · {x.unsold} in stock · {pct(x.sellThrough)} sell-through</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ ...display, fontWeight: 800, fontSize: 16, color: x.profit >= 0 ? T.pos : T.neg }}>{gbp(x.profit)}</div>
+                <div style={{ ...body, fontSize: 11.5, color: T.sec }}>{gbp(x.revenue)} revenue</div>
+              </div>
+            </div>
+            <ShareBar pct={g.profit > 0 ? (Math.max(0, x.profit) / g.profit) * 100 : 0} />
+          </div>
+        ))}
+      </div>
+    ) : empty(`Add a ${label} to items to see this breakdown.`)
+  );
+
+  const stockAge = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {ageBuckets.map((b) => (
+        <div key={b.label} style={{ ...box, padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <span style={{ ...body, fontWeight: 600, fontSize: 15 }}>{b.label}</span>
+            <span style={{ ...body, fontSize: 13, color: T.sec }}>{b.list.length} item{b.list.length === 1 ? "" : "s"} · {gbp(b.invested)}</span>
+          </div>
+          {b.list.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+              {b.list.slice(0, 5).map((it) => <ItemRow key={it.id} it={it} onOpen={() => go({ name: "detail", id: it.id })} />)}
+              {b.list.length > 5 && <div style={{ ...body, fontSize: 12, color: T.dim }}>+{b.list.length - 5} more</div>}
+            </div>
+          )}
+        </div>
       ))}
     </div>
   );
 
   return (
-    <>
-      <ScreenHeader title="Analytics" onBack={() => go({ name: "home" })}
-        right={
-          <select value={range} onChange={(e) => setRange(e.target.value)} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, fontSize: 12, padding: "7px 8px" }}>
-            {Object.keys(RANGES).map((k) => <option key={k}>{k}</option>)}
-          </select>
-        } />
-      <div style={{ padding: "14px 18px 24px" }}>
-        <div className="vscroll" style={{ display: "flex", gap: 7, overflowX: "auto", marginBottom: 14, paddingBottom: 2 }}>
-          {tabs.map((t) => <Chip key={t} label={t} active={tab === t} onClick={() => setTab(t)} />)}
-        </div>
-
-        {active.length === 0 ? (
-          <Empty icon={BarChart3} title="No data yet" desc="Analytics build themselves as you add stock and record sales." />
-        ) : tab === "Overview" ? (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-              <StatCard label="Revenue" value={gbp(g.revenue)} sub={`${g.sold} sales`} />
-              <StatCard label="Profit" value={gbp(g.profit)} color={g.profit > 0 ? T.pos : g.profit < 0 ? T.neg : T.text} />
-              <StatCard label="Stock spend" value={gbp(g.spend)} sub={`${g.purchased} purchases`} />
-              <StatCard label="Invested (unsold)" value={gbp(g.invested)} sub={`${g.unsold} items`} />
-              <StatCard label="Avg profit / sale" value={gbp(g.avgProfit)} />
-              <StatCard label="Avg margin" value={pct(g.avgMargin)} />
-              <StatCard label="Avg days to sell" value={g.avgDays == null ? "—" : Math.round(g.avgDays)} />
-              <StatCard label="Sell-through" value={pct(g.sellThrough)} sub="sold ÷ purchased" />
-            </div>
-            <Card>
-              <div style={{ ...body, fontSize: 12.5, fontWeight: 600, color: T.sec, marginBottom: 10 }}>Last 6 months (by sale date)</div>
-              <div style={{ width: "100%", height: 190 }}>
-                <ResponsiveContainer>
-                  <BarChart data={monthly} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
-                    <CartesianGrid stroke={T.border} vertical={false} />
-                    <XAxis dataKey="m" tick={{ fill: T.sec, fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: T.sec, fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, fontSize: 12 }} formatter={(v) => "£" + v} />
-                    <Bar dataKey="Revenue" fill={T.sec} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="Profit" fill={T.accent} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
-            {g.returned > 0 && <Banner icon={RotateCcw}>{g.returned} item{g.returned > 1 ? "s" : ""} returned in this period.</Banner>}
-          </>
-        ) : tab === "Brands" ? (
-          listBlock(byKey("brand"))
-        ) : tab === "Categories" ? (
-          listBlock(byKey("category"))
-        ) : tab === "Stock age" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {ageBuckets.every((b) => b.count === 0) && <Banner icon={Info}>No unsold stock with a purchase date set.</Banner>}
-            {ageBuckets.filter((b) => b.count > 0).map((b, idx) => (
-              <Card key={b.label}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <div style={{ ...body, fontWeight: 600, fontSize: 14 }}>{b.label}</div>
-                  <div style={{ ...body, fontSize: 12.5, color: T.sec }}>{b.count} item{b.count > 1 ? "s" : ""}</div>
-                </div>
-                <div style={{ display: "flex", gap: 14, marginBottom: 8 }}>
-                  <span style={{ ...body, fontSize: 12, color: T.sec }}>Invested <b style={{ color: T.text }}>{gbp(b.invested)}</b></span>
-                  <span style={{ ...body, fontSize: 12, color: T.sec }}>Est. value <b style={{ color: T.text }}>{b.estValue ? gbp(b.estValue) : "—"}</b></span>
-                </div>
-                <div style={{ ...body, fontSize: 12, color: idx >= 3 ? T.neg : T.sec, lineHeight: 1.5 }}>
-                  {idx <= 1 ? "Suggestion: keep the current price — still fresh." :
-                   idx === 2 ? "Suggestion: refresh photos or tweak the title if views are low." :
-                   idx === 3 ? "Suggestion: consider a price reduction or relisting." :
-                   "Suggestion: reduce price, bundle, relist, or try another platform to free up cash."}
-                </div>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <>
-            <div style={{ ...display, fontWeight: 600, fontSize: 15, marginBottom: 10 }}>Insights</div>
-            {insights.length === 0 ? (
-              <Banner icon={Info}>Not enough recorded data for insights yet — they appear as sales build up.</Banner>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
-                {insights.map((s, i) => (
-                  <Card key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                    <TrendingUp size={15} color={T.accent} style={{ flexShrink: 0, marginTop: 2 }} />
-                    <div style={{ ...body, fontSize: 13, lineHeight: 1.5 }}>{s}</div>
-                  </Card>
-                ))}
-              </div>
-            )}
-            <div style={{ ...display, fontWeight: 600, fontSize: 15, marginBottom: 10 }}>Buying decisions</div>
-            {decisions.total === 0 ? (
-              <Banner icon={Info}>Use the Opportunity Checker before buying and Resell HQ will track how accurate its calls were.</Banner>
-            ) : (
-              <Card>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-                  {RATINGS.map((rt) => decisions.counts[rt] > 0 && (
-                    <Chip key={rt} label={`${rt}: ${decisions.counts[rt]}`} color={RATING_COLOR[rt]} small />
-                  ))}
-                </div>
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-                  {[["Checks", decisions.total], ["Bought", decisions.purchased], ["Rejected", decisions.rejected],
-                    decisions.priceErr != null ? ["Avg price error", decisions.priceErr.toFixed(0) + "%"] : null,
-                    decisions.profitDiff != null ? ["Profit vs estimate", (decisions.profitDiff >= 0 ? "+" : "") + gbp(decisions.profitDiff)] : null,
-                    decisions.profitablePct != null ? ["Profitable buys", decisions.profitablePct.toFixed(0) + "%"] : null,
-                  ].filter(Boolean).map(([k, v]) => (
-                    <span key={k} style={{ ...body, fontSize: 12, color: T.sec }}>{k} <b style={{ color: T.text }}>{v}</b></span>
-                  ))}
-                </div>
-                {decisions.soldN === 0 && <div style={{ ...body, fontSize: 11.5, color: T.sec, marginTop: 10 }}>Accuracy stats appear once checked items sell.</div>}
-              </Card>
-            )}
-          </>
-        )}
+    <div style={{ padding: wide ? "24px 28px 36px" : "calc(14px + env(safe-area-inset-top, 0px)) 16px 28px", maxWidth: wide ? 1360 : undefined, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <button onClick={() => go({ name: "home" })} aria-label="Back" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 13, width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", color: T.text, cursor: "pointer", flexShrink: 0 }}>
+          <ChevronLeft size={20} />
+        </button>
+        <div style={{ ...display, fontWeight: 800, fontSize: 26, letterSpacing: "-0.02em", flex: 1 }}>Analytics</div>
+        <select value={range} onChange={(e) => setRange(e.target.value)}
+          style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 13, color: T.text, fontSize: 14, fontWeight: 600, padding: "10px 12px" }}>
+          {Object.keys(RANGES).map((k) => <option key={k}>{k}</option>)}
+        </select>
       </div>
-    </>
+      <div className="vscroll" style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 14 }}>
+        {["Overview", "Brands", "Categories", "Stock age"].map((t) => (
+          <button key={t} onClick={() => setTab(t)} style={{ flex: wide ? "0 0 auto" : 1, background: tab === t ? T.accentSoft : T.surface, color: tab === t ? T.text : T.sec, border: `1px solid ${tab === t ? T.accent : T.border}`, borderRadius: 999, padding: "10px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>{t}</button>
+        ))}
+      </div>
+      {tab === "Overview" && overview}
+      {tab === "Brands" && groupTable(brands, "brand")}
+      {tab === "Categories" && groupTable(categories, "category")}
+      {tab === "Stock age" && stockAge}
+    </div>
   );
 }
 
@@ -2704,7 +2744,7 @@ function AppShell({ isDesktop }) {
 
   const sellItem = sheet && sheet.type === "sell" ? items.find((i) => i.id === sheet.id) : null;
 
-  const fullWidth = ["home", "stock"].includes(screen.name) || !loaded;
+  const fullWidth = ["home", "stock", "analytics"].includes(screen.name) || !loaded;
   const main = (
     <div key={screen.name + (screen.id || "")} className="vscroll vfade" style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", minWidth: 0 }}>
       {wide && !fullWidth ? <div style={{ maxWidth: 760, margin: "0 auto" }}>{content}</div> : content}
