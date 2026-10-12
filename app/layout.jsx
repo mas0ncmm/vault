@@ -6,7 +6,7 @@ export const metadata = {
 };
 
 export const viewport = {
-  themeColor: "#010207",
+  themeColor: "#0B0B0C",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -16,7 +16,7 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en-GB">
-      <body style={{ margin: 0, background: "#010207" }}>{children}</body>
+      <body style={{ margin: 0, background: "#0B0B0C" }}>{children}</body>
     </html>
   );
 }

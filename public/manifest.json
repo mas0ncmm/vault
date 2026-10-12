@@ -3,7 +3,7 @@
   "short_name": "Resell HQ",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#010207",
-  "theme_color": "#010207",
+  "background_color": "#0B0B0C",
+  "theme_color": "#0B0B0C",
   "orientation": "portrait"
 }
